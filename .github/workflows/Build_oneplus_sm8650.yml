@@ -411,11 +411,11 @@ jobs:
         run: |
           echo "开始添加 ADIOS I/O 调度器支持..."
           if [ "${{ env.KERNEL_VERSION }}" = "6.1.115(天玑)" ]; then
-            PATCH_FILE="${GITHUB_WORKSPACE}/.github/workflows/tools/adios_ioscheduler_6.1_mt6989.patch"
+            PATCH_FILE="${GITHUB_WORKSPACE}/patch/adios_ioscheduler_6.1_mt6989.patch"
           elif [ "${{ env.KERNEL_VERSION }}" = "6.1.57" ] || [ "${{ env.KERNEL_VERSION }}" = "6.1.75" ]; then
-            PATCH_FILE="${GITHUB_WORKSPACE}/.github/workflows/tools/adios_ioscheduler_6.1_old.patch"
+            PATCH_FILE="${GITHUB_WORKSPACE}/patch/adios_ioscheduler_6.1_old.patch"
           else
-            PATCH_FILE="${GITHUB_WORKSPACE}/.github/workflows/tools/adios_ioscheduler_6.1.patch"
+            PATCH_FILE="${GITHUB_WORKSPACE}/patch/adios_ioscheduler_6.1.patch"
           fi
           if [ ! -f "$PATCH_FILE" ]; then
             echo "::error::未找到 ADIOS I/O 调度器补丁文件"
