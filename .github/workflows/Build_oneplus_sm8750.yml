@@ -550,6 +550,20 @@ jobs:
             echo "::error::Droidspaces patch 应用失败"
             exit 1
           fi
+          echo "==> 开始应用 ntsync 补丁..."
+          for PATCH_NAME in "ntsync_base.patch" "ntsync_compat_6.6.patch"; do
+            PATCH_PATH="${GITHUB_WORKSPACE}/patch/${PATCH_NAME}"
+            if [ ! -f "$PATCH_PATH" ]; then
+              echo "::error::未找到 ntsync 补丁: $PATCH_PATH"
+              exit 1
+            fi
+            echo "  应用: $PATCH_NAME"
+            dos2unix "$PATCH_PATH"
+            if ! git apply --ignore-whitespace "$PATCH_PATH"; then
+              echo "::warning::补丁 $PATCH_NAME 应用失败，可能已应用或上下文不匹配"
+            fi
+          done
+          echo "==> ntsync 补丁应用完成"
 
           
       - name: 🔧 Set gki_defconfig (设置编译配置) 
@@ -578,7 +592,6 @@ jobs:
           else
             echo "未启用SUSFS 跳过SUSFS配置"
           fi
-
           if [ "${{ env.ENABLE_DROIDSPACES }}" == 'true' ];then
             echo "应用Droidspaces推荐配置"
             echo "CONFIG_SYSVIPC=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -594,6 +607,7 @@ jobs:
             echo "CONFIG_IP_SET_HASH_IP=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_IP_SET_HASH_NET=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_NETFILTER_XT_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
+            echo "CONFIG_NTSYNC=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
           
           echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig

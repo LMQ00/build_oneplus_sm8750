@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..d95c737
 --- /dev/null
 +++ b/drivers/misc/ntsync.c
-@@ -0,0 +1,1273 @@
+@@ -0,0 +1,1272 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * ntsync.c - Kernel driver for NT synchronization primitives
