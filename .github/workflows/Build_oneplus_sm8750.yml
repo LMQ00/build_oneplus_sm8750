@@ -618,6 +618,15 @@ jobs:
           #Remove check_defconfig
           sudo sed -i 's/check_defconfig//' ./common/build.config.gki
 
+      - name: 🔧 Set Netfilter IPv6 Config (设置 Netfilter IPv6 配置)
+        run: |
+          cd kernel_workspace
+          echo "正在添加 Netfilter IPv6 相关配置..."
+          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP6_NF_TARGET_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "✓ Netfilter IPv6 配置添加完成"
+
       - name: 🔧 Set Kernel name (设置内核名称)
         run: |
           cd kernel_workspace
