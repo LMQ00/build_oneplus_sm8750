@@ -48,7 +48,7 @@ on:
       enable_droidspaces:
         description: "添加 Droidspaces 容器支持"
         required: true
-        default: true
+        default: false
         type: boolean
         
       enable_ReKernel:
