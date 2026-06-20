@@ -5,6 +5,12 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      enable_release:
+        description: "发布到 Releases"
+        required: true
+        default: true
+        type: boolean
+
       device_name:
         description: "📝请选择要编译的机型："
         required: true
@@ -42,7 +48,7 @@ on:
       enable_droidspaces:
         description: "添加 Droidspaces 容器支持"
         required: true
-        default: true
+        default: false
         type: boolean
         
       enable_ReKernel:
@@ -68,7 +74,6 @@ on:
         required: true
         default: true
         type: boolean
-      
 
 
 jobs:
@@ -86,6 +91,8 @@ jobs:
       ENABLE_ADIOS:           ${{ github.event.inputs.enable_Adios }}
       ENABLE_SCX:             ${{ github.event.inputs.enable_scx }}
       ENABLE_BBG:             ${{ github.event.inputs.enable_bbg }}
+    outputs:
+      ksuver: ${{ steps.ksu_step.outputs.ksuver }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -404,9 +411,14 @@ jobs:
 
       - name: 🔧 Apply Sched Patch (应用完美风驰补丁)
         run: |
+          FORCE_SCX=false
+          if [ "${{ env.ENABLE_DROIDSPACES }}" = "true" ] && [ "${{ env.ENABLE_SCX }}" != "true" ]; then
+            echo "::notice::Droidspaces 依赖完美风驰 (SCX)，已自动启用 SCX 补丁"
+            FORCE_SCX=true
+          fi
           if [ "$SCHED_FILE" = "none" ]; then
             echo "该机型自带风驰，跳过所有补丁应用"
-          elif [ "${{ env.ENABLE_SCX }}" = "true" ]; then
+          elif [ "${{ env.ENABLE_SCX }}" = "true" ] || [ "$FORCE_SCX" = "true" ]; then
             cd kernel_workspace/common
             if [ "${DEVICES_NAME}" = "oneplus_ace5_ultra" ] || [ "${DEVICES_NAME}" = "realme_GT7" ] || [ "${DEVICES_NAME}" = "oneplus_pad_2" ]; then
               git clone https://github.com/Numbersf/SCHED_PATCH.git -b "mt6991"
@@ -515,6 +527,7 @@ jobs:
 
           
       - name: ⚙️ Set ReSukiSU (设置 ReSukiSU)
+        id: ksu_step
         run: |
           cd kernel_workspace
           echo "正在配置 ReSukiSU..."
@@ -780,6 +793,7 @@ jobs:
   upload_rekernel:
     name: Upload Re-Kernel Module
     if: ${{ github.event.inputs.enable_ReKernel == 'true' }}
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: 🔎 Find Re-Kernel module zip (查找Re-Kernel最新模块并下载)
@@ -868,3 +882,160 @@ jobs:
         with:
           name: Re-Kernel-v${{ steps.download-rekernel.outputs.version-number }}
           path: Re-Kernel-v${{ steps.download-rekernel.outputs.version-number }}
+
+  release:
+    name: 📤 Create Release (创建发布)
+    needs: [build, upload_rekernel]
+    if: ${{ github.event.inputs.enable_release == 'true' && always() && needs.build.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: 📥 Download all artifacts (下载所有构建产物)
+        uses: actions/download-artifact@v5
+        with:
+          pattern: "*"
+          path: ./release_assets
+
+      - name: 📦 Prepare release files (准备发布文件)
+        run: |
+          echo "=== 下载的产物列表 ==="
+          ls -la ./release_assets/
+          echo ""
+
+          # 为每个 AK3 目录创建 zip 包
+          for ak3_dir in ./release_assets/AK3_*/; do
+            if [ -d "$ak3_dir" ]; then
+              name=$(basename "$ak3_dir")
+              echo "打包 AK3: $name"
+              (cd "$ak3_dir" && zip -qr "../${name}.zip" .)
+            fi
+          done
+
+          # 如果 Re-Kernel 模块存在，打包为 zip
+          for rk_dir in ./release_assets/Re-Kernel-v*/; do
+            if [ -d "$rk_dir" ]; then
+              name=$(basename "$rk_dir")
+              echo "打包 Re-Kernel: $name"
+              (cd "$rk_dir" && zip -qr "../${name}.zip" .)
+            fi
+          done
+
+          # 列出所有待上传的文件
+          echo ""
+          echo "=== 待上传到 Release 的文件 ==="
+          find ./release_assets -maxdepth 1 -type f | sort
+
+      - name: 🏷️ Create Release and Upload Assets (创建发布并上传)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # 时间戳
+          TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
+          TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+
+          # 编译机型
+          DEVICE_NAME="${{ github.event.inputs.device_name }}"
+
+          # KSU 版本号（来自 build job 输出的 ksuver）
+          KSU_VER="${{ needs.build.outputs.ksuver }}"
+
+          # 功能配置描述
+          FEATURES=""
+          if [ "${{ github.event.inputs.enable_ReKernel }}" = "true" ]; then
+            FEATURES="${FEATURES}- ✅ Re-Kernel 支持"$'\n'
+          fi
+          if [ "${{ github.event.inputs.enable_Adios }}" = "true" ]; then
+            FEATURES="${FEATURES}- ✅ ADIOS IO调度器"$'\n'
+          fi
+          if [ "${{ github.event.inputs.enable_scx }}" = "true" ] || [ "${{ github.event.inputs.enable_droidspaces }}" = "true" ]; then
+            FEATURES="${FEATURES}- ✅ 完美风驰 (SCX)"$'\n'
+          fi
+          if [ "${{ github.event.inputs.enable_bbg }}" = "true" ]; then
+            FEATURES="${FEATURES}- ✅ BBG 基带守护"$'\n'
+          fi
+          if [ "${{ github.event.inputs.enable_droidspaces }}" = "true" ]; then
+            FEATURES="${FEATURES}- ✅ Droidspaces 容器支持"$'\n'
+          fi
+          FEATURES="${FEATURES}- ✅ ReSukiSU (KernelSU)"$'\n'
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            FEATURES="${FEATURES}- ✅ SUSFS 挂载支持"$'\n'
+          fi
+
+          # 自定义内核后缀
+          KERNEL_SUFFIX="${{ github.event.inputs.custom_kernel_suffix }}"
+          if [ -z "$KERNEL_SUFFIX" ]; then
+            KERNEL_SUFFIX="默认官方"
+          fi
+
+          # 自定义构建时间
+          KERNEL_TIME="${{ github.event.inputs.custom_kernel_time }}"
+          if [ -z "$KERNEL_TIME" ]; then
+            KERNEL_TIME="默认官方"
+          fi
+
+          # 生成 Release 说明
+          cat << ENDOFF > release_notes.md
+          ### 📱 SM8750 欧加真通用内核 | 构建信息
+
+          - **内核版本**: SM8750 (Android 15 / 6.6)
+          - **ReSukiSU 版本**: ${KSU_VER}
+          - **编译时间**: ${TIME_FORM}
+          - **编译机型**: ${DEVICE_NAME}
+          - **内核后缀**: ${KERNEL_SUFFIX}
+          - **构建时间**: ${KERNEL_TIME}
+          - **仓库**: ${{ github.repository }}
+          - **运行 ID**: ${{ github.run_id }}
+          - **提交**: ${{ github.sha }}
+
+          ### ⚙️ 功能配置
+
+          ${FEATURES}
+          ### ⏫️ 更新内容
+
+          - 更新 ReSukiSU 至最新版本 (${KSU_VER})
+          - 同步上游内核源码
+
+          ### 📋 安装方法 | Installation Guide
+
+          1. 若你已刷入 ReSukiSU 内核，且 ReSukiSU 管理器已更新至最新版本，可在管理器中直接刷入 AnyKernel 刷机包并重启；
+          2. 由于 KernelSU 上游更新了元模块功能，最新版 KSU 管理器需要配合元模块 (metamodule) 才能正常挂载模块。目前的元模块包括 [meta overlayfs](https://github.com/KernelSU-Modules-Repo/meta-overlayfs), [mountify](https://github.com/backslashxx/mountify), [meta magicmount](https://github.com/7a72/meta-magic_mount/) 等。若你是第一次使用 KSU 或刚从旧版 KSU 管理器升级至新版，请先安装一个元模块；
+          3. 若启用 Re-Kernel，需刷入配套Re-Kernel模块并配合 NoActive 软件使用，以提升后台冻结能力。
+
+          #### 🔗 相关链接
+
+          - ReSukiSU 管理器: [ReSukiSU_CI](https://github.com/cctv18/ReSukiSU_CI/releases)
+          - SukiSU Ultra 管理器: [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
+          - KernelSU Next 管理器: [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next/releases)
+          - KernelSU 原版管理器: [KernelSU](https://github.com/tiann/KernelSU/releases)
+          - TG频道@qdykernel: [TG频道@qdykernel](https://t.me/qdykernel)
+
+          #### ※※※ 刷写内核有风险，为防止出现意外导致手机变砖，在刷入内核前请务必用 [KernelFlasher](https://github.com/capntrips/KernelFlasher) 等软件备份 boot 等关键启动分区! ※※※
+          ENDOFF
+
+          echo "=== Release 说明 ==="
+          cat release_notes.md
+          echo ""
+
+          # 收集所有待上传的文件（仅 AK3 zip 和 Re-Kernel zip）
+          RELEASE_FILES=$(find ./release_assets -maxdepth 1 -type f \( -name 'AK3_*.zip' -o -name 'Re-Kernel-v*.zip' \) 2>/dev/null || true)
+
+          if [ -z "$RELEASE_FILES" ]; then
+            echo "::warning::没有找到待上传的发布文件"
+            RELEASE_FILES=""
+          fi
+
+          echo "=== 创建 Release ==="
+          TAG_NAME="SM8750-${DEVICE_NAME}-build-${TIME}"
+
+          gh release create "${TAG_NAME}" \
+            --repo "${{ github.repository }}" \
+            --title "SM8750 ${DEVICE_NAME} Kernel Build - ${TIME_FORM}" \
+            --notes-file release_notes.md \
+            ${RELEASE_FILES}
+
+          echo ""
+          echo "✅ Release 创建完成: ${TAG_NAME}"
