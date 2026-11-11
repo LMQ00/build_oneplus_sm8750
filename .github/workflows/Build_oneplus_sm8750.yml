@@ -133,13 +133,18 @@ jobs:
               echo "SCHED_FILE=oneplus_ace5_ultra_b" >> $GITHUB_ENV
               ;;
             realme_GT7pro)
-              echo "SCHED_FILE=oneplus_ace_6" >> $GITHUB_ENV
+              # 6.6.118 源码分支（与设备实际内核 6.6.118-android15-8-g9bc34d5b0c79-abogki537459655-4k 对齐）
+              echo "REALME_SRC_BRANCH=oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118" >> $GITHUB_ENV
+              # 该源码已内置风驰 hmbird 调度（kernel/sched/hmbird/，CONFIG_HMBIRD_SCHED=y），无需再打风驰补丁
+              echo "SCHED_FILE=none" >> $GITHUB_ENV
               ;;
             realme_GT7pro_Speed)
+              echo "REALME_SRC_BRANCH=oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118" >> $GITHUB_ENV
+              echo "SCHED_FILE=none" >> $GITHUB_ENV
+              ;;
+            realme_GT8)
               echo "SCHED_FILE=oneplus_ace_6" >> $GITHUB_ENV
               ;;
-            realme_GT8)-
-              echo "SCHED_FILE=oneplus_ace_6" >> $GITHUB_ENV
           esac
           if [ -z "${{ github.event.inputs.custom_kernel_suffix }}" ]; then
             case "${{ env.DEVICES_NAME }}" in
@@ -204,7 +209,28 @@ jobs:
             exit 1
           fi
           echo "正在克隆源码仓库..."
-          if [ "${DEVICES_NAME}" = "realme_GT7pro" ] || [ "${DEVICES_NAME}" = "realme_GT7pro_Speed" ] || [ "${DEVICES_NAME}" = "realme_GT8" ]; then
+          if [ "${DEVICES_NAME}" = "realme_GT7pro" ] || [ "${DEVICES_NAME}" = "realme_GT7pro_Speed" ]; then
+            # realme_GT7pro / realme_GT7pro_Speed：设备实际内核为 6.6.118
+            # （6.6.118-android15-8-g9bc34d5b0c79-abogki537459655-4k），因此拉取 6.6.118 源码分支，
+            # 不再使用 realme GT8 的 6.6.89 源码。
+            if [ -z "${REALME_SRC_BRANCH}" ]; then
+              echo "::error::REALME_SRC_BRANCH 未设置，无法确定 realme 源码分支"
+              exit 1
+            fi
+            echo "realme 源码分支：${REALME_SRC_BRANCH}（内核 6.6.118）"
+            SRC_URL="https://github.com/cctv18/android_kernel_common_oneplus_sm8750/archive/refs/heads/${REALME_SRC_BRANCH}.zip"
+            echo "源码下载地址：${SRC_URL}"
+            curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 -o common.zip "${SRC_URL}"
+            unzip -q common.zip
+            # GitHub 归档目录名会把分支名里的 / 替换成 -
+            SRC_DIR="android_kernel_common_oneplus_sm8750-${REALME_SRC_BRANCH//\//-}"
+            if [ ! -d "${SRC_DIR}" ]; then
+              echo "::error::源码解压目录 ${SRC_DIR} 不存在，实际解压内容如下："
+              ls -1
+              exit 1
+            fi
+            mv "${SRC_DIR}" common
+          elif [ "${DEVICES_NAME}" = "realme_GT8" ]; then
             aria2c -s16 -x16 -k1M https://github.com/realme-kernel-opensource/realme_GT8-AndroidB-common-source/archive/refs/heads/master.zip -o common.zip
             unzip -q common.zip && 
             mv "realme_GT8-AndroidB-common-source-master" common
@@ -465,9 +491,23 @@ jobs:
                 exit 1
               fi
               cp "$PATCH_FILE" ./Fix_Screen_Flickering.patch
-              echo "开始应用屏幕闪烁修复补丁"
-              patch -p1 -F 3 < Fix_Screen_Flickering.patch
-              echo "✅ 屏幕闪烁修复补丁应用完成"
+              # 6.6.118 官方源码分支（cctv18 oneplus/sm8750_b_16.0.0_oneplus_13_6.6.118）已内置
+              # 该修复（drivers/gpu/drm 的 encoder_clones_explicit 改动）。先做反向预检：
+              # 反向能干净打上 => 源码已含该修复 => 跳过；否则按正向应用，且应用失败必须 fail-loud。
+              if patch -p1 -R --dry-run -F 3 -s < Fix_Screen_Flickering.patch > /dev/null 2>&1; then
+                echo "ℹ️ 源码已内置屏幕闪烁修复（反向预检通过），跳过正向应用"
+                rm -f Fix_Screen_Flickering.patch
+              else
+                echo "源码未内置该修复，开始正向应用屏幕闪烁修复补丁"
+                if patch -p1 -F 3 < Fix_Screen_Flickering.patch; then
+                  echo "✅ 屏幕闪烁修复补丁应用完成"
+                else
+                  echo "::error::屏幕闪烁修复补丁应用失败（内核 6.6.118 且源码未内置该修复）"
+                  find . -name '*.rej' -newer Fix_Screen_Flickering.patch 2>/dev/null | head -n 20 || true
+                  exit 1
+                fi
+                rm -f Fix_Screen_Flickering.patch
+              fi
             else
               echo "⚠️ 内核版本非 6.6.118，跳过屏幕闪烁修复补丁"
             fi
@@ -559,8 +599,71 @@ jobs:
           cp ./oppo_oplus_realme_sm8750/zram_patch/lz4armv8.S ./common/lib
           cp ./oppo_oplus_realme_sm8750/zram_patch/002-zstd.patch ./common/
           cd ./common
-          git apply -p1 < 001-lz4.patch || true
-          patch -p1 < 002-zstd.patch || true
+          # 001-lz4 依赖源码树里已有的 fs/f2fs/lz4armv8/（6.6.118 分支已内置该目录），
+          # 该补丁是「移动 + 改写」的大补丁。注意：git apply 是原子的（失败则整棵树不动），
+          # 而 patch(1) 不是原子的，半途失败会留下「一半新一半旧」的 lib/lz4，风险更高。
+          # 因此这里保持原子语义：预检失败就整份跳过（等价于旧 `|| true` 的实际效果），但必须打印告警。
+          if git apply -p1 --check 001-lz4.patch 2>/tmp/lz4_check.log; then
+            git apply -p1 < 001-lz4.patch
+            echo "✓ 001-lz4.patch 应用成功"
+          else
+            echo "::warning::001-lz4.patch 预检未通过，整份跳过（保持源码树原样，避免半应用造成不一致）"
+            cat /tmp/lz4_check.log
+            echo "ℹ️ 源码树 lz4 保持 6.6.118 原始版本（lz4 1.10.0 未应用）"
+          fi
+          # 002-zstd.patch：不再用 `|| true` 静默吞掉失败。
+          # 做法：应用前/后各取一次 .rej 快照做差集，只判定「本次新增」的 reject，
+          # 避免误伤源码树里本来就存在的 .rej（该 6.6.118 源码分支自带 21 个 .rej）。
+          # 已知无害的 reject 单独放行（见 ZSTD_KNOWN_BENIGN_REJ 注释），其余新增 reject 一律 exit 1。
+          find . -name '*.rej' | sort > /tmp/zstd_rej_before.txt
+          set +e
+          patch -p1 -F 3 < 002-zstd.patch > /tmp/zstd_apply.log 2>&1
+          ZSTD_RC=$?
+          set -e
+          find . -name '*.rej' | sort > /tmp/zstd_rej_after.txt
+          ZSTD_NEW_REJ=$(comm -13 /tmp/zstd_rej_before.txt /tmp/zstd_rej_after.txt)
+          # 已知无害 reject：
+          #   ./lib/zstd/common/portability_macros.h.rej  —— hunk #3 只改 x86 的 DYNAMIC_BMI2/CET 分支，
+          #   arm64 构建不涉及；该文件在 6.6.118 里已是更新的等价实现。历史 6.6.89 构建同样出现此 reject
+          #   （见成功构建日志）且编译通过，故放行但仍打印告警。
+          ZSTD_KNOWN_BENIGN_REJ="./lib/zstd/common/portability_macros.h.rej"
+          ZSTD_UNEXPECTED_REJ=""
+          if [ -n "$ZSTD_NEW_REJ" ]; then
+            while IFS= read -r rej; do
+              [ -z "$rej" ] && continue
+              if [ "$rej" = "$ZSTD_KNOWN_BENIGN_REJ" ]; then
+                echo "::warning::002-zstd.patch 已知无害 reject（x86 专用配置，arm64 不影响）：$rej"
+              else
+                echo "::error::002-zstd.patch 出现未预期的 reject：$rej"
+                ZSTD_UNEXPECTED_REJ="${ZSTD_UNEXPECTED_REJ}${rej}"$'\n'
+              fi
+            done <<< "$ZSTD_NEW_REJ"
+            echo "---- patch 输出（含 FAILED 行）----"
+            grep -E "FAILED|rejects" /tmp/zstd_apply.log || cat /tmp/zstd_apply.log
+          fi
+          if [ -n "$ZSTD_UNEXPECTED_REJ" ]; then
+            echo "::error::002-zstd.patch 存在未预期 reject（patch rc=${ZSTD_RC}），终止构建"
+            printf '%s' "$ZSTD_UNEXPECTED_REJ"
+            exit 1
+          fi
+          # patch 退出码语义：0=全部成功，1=部分 hunk 失败（已写 .rej），2=严重错误
+          # （补丁格式错误 / 目标文件缺失等，此时可能不产生 .rej）。rc=2 必须直接终止。
+          if [ "$ZSTD_RC" -eq 2 ]; then
+            echo "::error::002-zstd.patch 严重失败（patch rc=2，可能为补丁格式错误或目标文件缺失）"
+            cat /tmp/zstd_apply.log
+            exit 1
+          fi
+          if [ "$ZSTD_RC" -eq 1 ] && [ -z "$ZSTD_NEW_REJ" ]; then
+            echo "::warning::002-zstd.patch 返回码 1（无新增 .rej，可能为 reversed/skip），继续"
+            cat /tmp/zstd_apply.log
+          fi
+          # 功能性校验：zstd 必须确实升到 1.5.7（补丁的实际目的），否则视为补丁未生效
+          ZSTD_RELEASE=$(awk '/^#define ZSTD_VERSION_RELEASE/ {gsub(/[^0-9]/,"",$3); print $3; exit}' include/linux/zstd_lib.h 2>/dev/null || true)
+          if [ "$ZSTD_RELEASE" != "7" ]; then
+            echo "::error::002-zstd.patch 未生效：期望 zstd 1.5.7，实际 include/linux/zstd_lib.h 里 ZSTD_VERSION_RELEASE=${ZSTD_RELEASE:-未取到}"
+            exit 1
+          fi
+          echo "✓ 002-zstd.patch 生效，zstd 版本确认为 1.5.${ZSTD_RELEASE}"
           
       - name: 🔧 Set Baseband-guard (开启 BBG 基带守护)
         if: ${{ env.ENABLE_BBG == 'true' }}
@@ -593,10 +696,76 @@ jobs:
           cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
           cd ./common
-          patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch || true
-          patch -p1 -N -F 3 < 69_hide_stuff.patch || true
+          # 50_add_susfs 在 6.6.118 源码上会有一个 hunk（fs/proc/task_mmu.c 的 show_smaps_rollup 段）
+          # 被拒绝，旧写法 `|| true` 会把它完全吞掉。这里改为：应用前后做 .rej 差集，
+          # 有新增 reject 时打印明确的 error（含文件名与 FAILED 行），但保留原有“非致命”语义
+          # ——因为后续 69_hide_stuff.patch 会重新处理同一批文件，不应在这里中断整条构建。
+          find . -name '*.rej' | sort > /tmp/susfs_rej_before.txt
+          set +e
+          patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch > /tmp/susfs_apply.log 2>&1
+          SUSFS_RC=$?
+          set -e
+          find . -name '*.rej' | sort > /tmp/susfs_rej_after.txt
+          SUSFS_NEW_REJ=$(comm -13 /tmp/susfs_rej_before.txt /tmp/susfs_rej_after.txt)
+          if [ -n "$SUSFS_NEW_REJ" ]; then
+            echo "::error::50_add_susfs 有 hunk 被拒绝（patch rc=${SUSFS_RC}），新增 reject 文件："
+            printf '%s\n' "$SUSFS_NEW_REJ"
+            echo "---- FAILED 行 ----"
+            grep -E "FAILED|rejects" /tmp/susfs_apply.log || cat /tmp/susfs_apply.log
+          elif [ "$SUSFS_RC" -ne 0 ]; then
+            echo "::warning::50_add_susfs 返回码 ${SUSFS_RC}（无新增 .rej）"
+            cat /tmp/susfs_apply.log
+          else
+            echo "✓ 50_add_susfs 应用成功（无 reject）"
+          fi
+          # 69_hide_stuff 同样去掉 `|| true` 的静默：保留 -N（已应用则跳过）并做 reject 可见化
+          find . -name '*.rej' | sort > /tmp/hide_rej_before.txt
+          set +e
+          patch -p1 -N -F 3 < 69_hide_stuff.patch > /tmp/hide_apply.log 2>&1
+          HIDE_RC=$?
+          set -e
+          find . -name '*.rej' | sort > /tmp/hide_rej_after.txt
+          HIDE_NEW_REJ=$(comm -13 /tmp/hide_rej_before.txt /tmp/hide_rej_after.txt)
+          if [ -n "$HIDE_NEW_REJ" ]; then
+            echo "::error::69_hide_stuff 有 hunk 被拒绝（patch rc=${HIDE_RC}），新增 reject 文件："
+            printf '%s\n' "$HIDE_NEW_REJ"
+            echo "---- FAILED 行 ----"
+            grep -E "FAILED|rejects" /tmp/hide_apply.log || cat /tmp/hide_apply.log
+          elif [ "$HIDE_RC" -ne 0 ]; then
+            echo "::warning::69_hide_stuff 返回码 ${HIDE_RC}（无新增 .rej，可能为 skip/reversed）"
+            cat /tmp/hide_apply.log
+          else
+            echo "✓ 69_hide_stuff 应用成功（无 reject）"
+          fi
           echo "[OK] SUSFS 补丁处理流程全部完成"
 
+      # === LZ4KDS_STEP_INJECTION_POINT ===
+      - name: 🔧 Apply LZ4K / LZ4KD / hmbird patches (接入 LZ4K/LZ4KD 压缩 + 修风驰)
+        run: |
+          set -euo pipefail
+          cd kernel_workspace/common
+          echo "=============================================="
+          echo " LZ4K / LZ4KD 压缩算法（in-tree）"
+          echo "=============================================="
+          # 新增文件整份拷贝，已有文件按锚点幂等插入，
+          # 因此不受前面 SUSFS / lz4 / zstd 补丁造成的上下文漂移影响。
+          bash "${GITHUB_WORKSPACE}/patch/lz4kds/scripts/apply_intree.sh" "$(pwd)"
+
+          echo "=============================================="
+          echo " 风驰 hmbird：DT 版本门 + CPU 亲和性"
+          echo "=============================================="
+          # (a) RMX5010 的 DT 没有 /soc/oplus,hmbird 节点，原实现会落成
+          #     HMBIRD_UNKNOW_VERSION，使 hmbird_proc_init() /
+          #     hmbird_shadow_tick_init() 全部 early-return，风驰等于没编进内核。
+          # (b) hmbird 的 task_can_run_on_rq() 不看 p->cpus_ptr，且 core.c 对
+          #     hmbird class 跳过了 select_fallback_rq()，会把任务投到亲和性之外。
+          bash "${GITHUB_WORKSPACE}/patch/lz4kds/scripts/apply_hmbird.sh" "$(pwd)"
+
+          echo "=============================================="
+          echo " 改动核对"
+          echo "=============================================="
+          grep -n 'LZ4KDS_HMBIRD' include/linux/sched/hmbird_version.h kernel/sched/hmbird/hmbird.c
+          grep -n 'CRYPTO_LZ4K' arch/arm64/configs/gki_defconfig
       - name: 🔧 Set gki_defconfig (设置编译配置) 
         run: |
           cd kernel_workspace
@@ -640,6 +809,34 @@ jobs:
           ESCAPED_SUFFIX=$(printf '%s\n' "$DEFAULT_SUFFIX" | sed 's:[\/&]:\\&:g')
           sudo sed -i "s/-4k/$ESCAPED_SUFFIX/g" ./common/arch/arm64/configs/gki_defconfig
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
+
+      - name: 🔧 Fix host tools libbpf const qualifier (修复 host 工具 libbpf 编译错误)
+        run: |
+          # 内核上游既有修复：tools/lib/bpf/libbpf.c 中 resolve_full_path() 的
+          # `char *next_path` 应为 `const char *next_path`。否则在 clang18 + -Werror 下，
+          # 编译 tools/bpf/resolve_btfids 时会报：
+          #   libbpf.c:11241:14: error: assigning to 'char *' from 'const char *'
+          #   discards qualifiers [-Werror,-Wincompatible-pointer-types-discards-qualifiers]
+          # 这里显式修正源码本身，而不是关闭 -Werror。
+          cd kernel_workspace/common
+          LIBBPF_C="tools/lib/bpf/libbpf.c"
+          if [ ! -f "$LIBBPF_C" ]; then
+            echo "::error::未找到 $LIBBPF_C"
+            exit 1
+          fi
+          if grep -q '^\s*const char \*next_path;' "$LIBBPF_C"; then
+            echo "✓ libbpf.c next_path 已是 const，无需修改"
+          else
+            echo "正在修正 $LIBBPF_C 中 next_path 的 const 限定符…"
+            sed -i 's/^\(\s*\)char \*next_path;/\1const char *next_path;/' "$LIBBPF_C"
+            if ! grep -q '^\s*const char \*next_path;' "$LIBBPF_C"; then
+              echo "::error::$LIBBPF_C 中未找到预期的 next_path 声明，修复未生效"
+              grep -n "next_path" "$LIBBPF_C" || true
+              exit 1
+            fi
+            echo "✓ libbpf.c next_path 已修正为 const"
+          fi
+          grep -n "next_path" "$LIBBPF_C" | head -n 5
 
       - name: 📥 Start build timer (构建计时开始)
         run: 
@@ -707,6 +904,43 @@ jobs:
           echo "ccache 状态："
           ccache -s
       
+
+      - name: 🧪 ABI precheck (刷机前 ABI 预检)
+        run: |
+          set -euo pipefail
+          cd kernel_workspace/common
+          # 把本次构建导出的 CRC 与设备原厂 KO 记录的 CRC 逐条比对。
+          # 不一致说明这份内核与设备 ABI 不等价，刷进去模块会被拒绝加载。
+          python3 "${GITHUB_WORKSPACE}/patch/lz4kds/abi/check_abi.py" \
+            --our-symvers out/vmlinux.symvers \
+            --reference   "${GITHUB_WORKSPACE}/patch/lz4kds/abi/device_crc_reference.tsv"
+
+      - name: 🔧 Build LZ4KDS zram driver (编译 LZ4KDS 版 zram 驱动)
+        run: |
+          set -euo pipefail
+          export PATH="${GITHUB_WORKSPACE}/kernel_workspace/clang18/bin:${GITHUB_WORKSPACE}/kernel_workspace/build-tools/bin:$PATH"
+          cd kernel_workspace/common
+          # out-of-tree 构建：设备上 zram 由厂商模块 oplus_bsp_hybridswap_zram.ko 提供，
+          # 把驱动编进 Image 并不会替换它；只有独立 .ko 才能在侧载后真正接管 zram。
+          bash "${GITHUB_WORKSPACE}/patch/lz4kds/scripts/build_driver.sh" \
+            "$(pwd)" "${GITHUB_WORKSPACE}/lz4kds_out"
+
+      - name: 📦 Package LZ4KDS KSU module (打包 LZ4KDS 侧载模块)
+        run: |
+          set -euo pipefail
+          # zsmalloc 是厂商二进制，不打进 zip：由 customize.sh 在设备上从
+          # /vendor/lib/modules/ 直接复制，天然与设备内核版本一致。
+          bash "${GITHUB_WORKSPACE}/patch/lz4kds/scripts/package_ksu_module.sh" \
+            "${GITHUB_WORKSPACE}/lz4kds_out" \
+            "${GITHUB_WORKSPACE}/lz4kds_module"
+
+      - name: 📤 Upload LZ4KDS module (上传 LZ4KDS 侧载模块)
+        uses: actions/upload-artifact@v6
+        with:
+          name: LZ4KDS_module_${{ env.DEVICES_NAME }}
+          path: ${{ github.workspace }}/lz4kds_module/*.zip
+          if-no-files-found: error
+
       - name: 🕒 Calculate build time (计算构建时间)
         run: |
           END=$(date +%s)
@@ -916,6 +1150,19 @@ jobs:
             fi
           done
 
+          # LZ4KDS 侧载模块：build job 里已经打好 zip，直接提到根目录参与发布。
+          # 这是 KernelSU 模块（preinit 抢载 KO），与 AK3 内核包相互独立。
+          for lz_dir in ./release_assets/LZ4KDS_module_*/; do
+            if [ -d "$lz_dir" ]; then
+              for z in "$lz_dir"*.zip; do
+                [ -f "$z" ] || continue
+                name=$(basename "$z")
+                echo "收集 LZ4KDS 模块: $name"
+                cp -f "$z" "./release_assets/${name}"
+              done
+            fi
+          done
+
           # 列出所有待上传的文件
           echo ""
           echo "=== 待上传到 Release 的文件 ==="
@@ -1015,7 +1262,7 @@ jobs:
           echo ""
 
           # 收集所有待上传的文件（仅 AK3 zip 和 Re-Kernel zip）
-          RELEASE_FILES=$(find ./release_assets -maxdepth 1 -type f \( -name 'AK3_*.zip' -o -name 'Re-Kernel-v*.zip' \) 2>/dev/null || true)
+          RELEASE_FILES=$(find ./release_assets -maxdepth 1 -type f \( -name 'AK3_*.zip' -o -name 'Re-Kernel-v*.zip' -o -name 'lz4kds-ksu-*.zip' \) 2>/dev/null || true)
 
           if [ -z "$RELEASE_FILES" ]; then
             echo "::warning::没有找到待上传的发布文件"

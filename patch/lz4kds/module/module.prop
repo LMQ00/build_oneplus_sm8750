@@ -1,0 +1,6 @@
+id=lz4kds
+name=LZ4KDS 内存压缩（RMX5010 6.6.118）
+version=1.0-r510928
+versionCode=1
+author=LMQ00 / jkHXQ（适配层）
+description=LZ4KD+LZ4KDS 双压缩支持｜相同页共享、相似页只存差异｜KO 侧载只改运行内存不写分区｜preinit 最早接管，失败自动回退原厂｜卸载即还原
