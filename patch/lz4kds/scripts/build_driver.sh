@@ -29,6 +29,17 @@ if [ ! -f "$KSRC/out/Module.symvers" ]; then
 	echo "  已用 vmlinux.symvers 生成 Module.symvers"
 fi
 
+# modfinal 阶段要用 out/scripts/module.lds 给 .ko 做最终链接。这个文件由
+# `make modules_prepare` 生成，而常规的 `make Image` **不会**触发它 —— 缺了就会报
+#   make[4]: *** No rule to make target '.../*.ko', needed by '__modfinal'
+# 用 target 直接生成，比跑整个 modules_prepare 快得多，也不会重编任何东西。
+if [ ! -f "$KSRC/out/scripts/module.lds" ]; then
+	echo "== 生成 out/scripts/module.lds（modfinal 需要）=="
+	( cd "$KSRC" && make O=out LLVM=1 ARCH=arm64 scripts/module.lds ) \
+		|| fail "生成 out/scripts/module.lds 失败"
+	[ -f "$KSRC/out/scripts/module.lds" ] || fail "out/scripts/module.lds 仍未生成"
+fi
+
 echo "== 准备 out-of-tree 构建目录 =="
 # 目录必须保持厂商布局：驱动头文件用 ../thp_zsmalloc/ 这种相对路径引用。
 WORK="${OUTDIR%/}/build"
