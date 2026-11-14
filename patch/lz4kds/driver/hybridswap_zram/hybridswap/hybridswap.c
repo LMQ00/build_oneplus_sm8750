@@ -2520,11 +2520,29 @@ static bool hybridswap_global_setting_init(struct zram *zram)
 
 void hybridswap_global_setting_deinit(void)
 {
-	destroy_workqueue(global_settings.reclaim_wq);
-	hybridswap_free(global_settings.stat);
+	if (global_settings.reclaim_wq)
+		destroy_workqueue(global_settings.reclaim_wq);
+	if (global_settings.stat)
+		hybridswap_free(global_settings.stat);
 	global_settings.stat = NULL;
 	global_settings.zram = NULL;
 	global_settings.reclaim_wq = NULL;
+}
+
+/*
+ * 模块卸载前把 global_settings 起的东西全部撤掉。lpc_timer 的回调与 lpc_work
+ * 的执行体都在模块里，定时器不删就会在代码段释放之后被触发。
+ * 可以重复调用：只有 hybridswap_core_init 跑过才会有这些资源。
+ */
+void __exit hybridswap_global_setting_exit(void)
+{
+	if (!global_settings.stat && !global_settings.reclaim_wq)
+		return;
+
+	if (global_settings.stat)
+		del_timer_sync(&global_settings.lpc_timer);
+	cancel_work_sync(&global_settings.lpc_work);
+	hybridswap_global_setting_deinit();
 }
 
 struct workqueue_struct *hybridswap_get_reclaim_workqueue(void)

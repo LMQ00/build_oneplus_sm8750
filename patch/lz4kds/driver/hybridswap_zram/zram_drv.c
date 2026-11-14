@@ -3042,15 +3042,23 @@ static void __exit zram_exit(void)
 #if IS_ENABLED(CONFIG_KCOMPRESSD)
 	kcompressd_exit();
 #endif
-	destroy_devices();
+
 	/*
-	 * 七个 android_vh 探针的回调都在本模块的 .text 里，内核不会因为模块卸载
-	 * 就把它们摘掉，两个 cgroup 文件数组同理。必须显式注销，否则卸载之后
-	 * 任何一次内存回收或 memcg 分配都会跳到已释放的地址上。
-	 *
-	 * 顺序不能反：destroy_devices 释放 zram 页时会走 hybridswap_untrack，
-	 * 那条路径要读 hybridswap_cache，先销毁缓存会踩到已经释放的 slab。
+	 * 卸载分三步，顺序都是必须的：
+	 *   1. 停 swapd 线程。它们的执行体在本模块里，且持有 zram 指针，
+	 *      必须在设备销毁前停。
+	 *   2. destroy_devices 释放 zram 页。这条路径要走 hybridswap_untrack，
+	 *      而 hybridswap_untrack 会碰 memcg 上的 hybridswap_cache 对象，
+	 *      所以缓存必须等它跑完再销毁。
+	 *   3. hybridswap_exit 注销七个 android_vh 探针与两个 cgroup 文件数组。
+	 *      内核不会因为模块卸载就替我们摘掉注册到别人 tracepoint 上的探针。
 	 */
+#ifdef CONFIG_HYBRIDSWAP
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+	hybridswap_pre_shutdown();
+#endif
+#endif
+	destroy_devices();
 #ifdef CONFIG_HYBRIDSWAP
 	hybridswap_exit();
 #endif
