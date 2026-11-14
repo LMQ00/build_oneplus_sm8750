@@ -26,6 +26,7 @@ import sys
 import tempfile
 
 SHT_SYMTAB = 2
+SHT_NOBITS = 8
 ELF_HEADER_SIZE = 64
 
 
@@ -109,6 +110,14 @@ def read_sections(data):
             raise BadInput("节名没有终止符：0x%x" % start)
         sec["name"] = data[start:end].decode("utf-8", "replace")
 
+    # 链接器不会让两个占文件空间的段重叠。段表被改过（sh_offset / sh_size 挪位）
+    # 时这里就会报出来，否则写回会落到别的段里去。
+    filled = sorted((s for s in sections if s["size"] and s["typ"] != SHT_NOBITS),
+                    key=lambda s: s["offset"])
+    for prev, cur in zip(filled, filled[1:]):
+        if prev["offset"] + prev["size"] > cur["offset"]:
+            raise BadInput("%s 与 %s 的文件范围重叠" % (prev["name"], cur["name"]))
+
     return sections
 
 
@@ -183,6 +192,11 @@ def main():
 
     try:
         ref = parse_reference(args.reference)
+    except (OSError, ValueError, BadInput) as exc:
+        print("::error::%s" % exc)
+        return 2
+
+    try:
         with open(args.ko, "rb") as handle:
             data = bytearray(handle.read())
         mode = os.stat(args.ko).st_mode
@@ -202,6 +216,12 @@ def main():
     if not crc_sections:
         print("::error::%s 里没有 __kcrctab 段" % args.ko)
         return 2
+    for sec in crc_sections.values():
+        try:
+            check_range(data, sec, sec["name"])
+        except BadInput as exc:
+            print("::error::%s：%s" % (args.ko, exc))
+            return 2
 
     have_crc = {s["name"][len("__crc_"):] for s in symbols
                 if s["name"].startswith("__crc_")}

@@ -15,12 +15,12 @@ fi
 # 驱动现在由 post-fs-data.sh 加载，这里清掉它，避免同一份 KO 被装两次。
 rm -rf /metadata/vold/ksu/preinit/lz4kds
 
-set_perm_recursive $MODPATH 0 0 0755 0644
-set_perm $MODPATH/customize.sh 0 0 0755
-set_perm $MODPATH/post-fs-data.sh 0 0 0755
-set_perm $MODPATH/service.sh 0 0 0755
-set_perm $MODPATH/zram.sh 0 0 0755
-set_perm $MODPATH/webroot/webui.sh 0 0 0755
-set_perm $MODPATH/uninstall.sh 0 0 0755
+set_perm_recursive "$MODPATH" 0 0 0755 0644
+set_perm "$MODPATH/customize.sh" 0 0 0755
+set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
+set_perm "$MODPATH/service.sh" 0 0 0755
+set_perm "$MODPATH/zram.sh" 0 0 0755
+set_perm "$MODPATH/webroot/webui.sh" 0 0 0755
+set_perm "$MODPATH/uninstall.sh" 0 0 0755
 
 ui_print "- 安装完成，重启后生效"

@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # boot 完成后记录自检结果与运行状态，便于跨版本/换机型后核对
-MOD=/data/adb/modules/lz4kds
+MOD=${MODPATH:-/data/adb/modules/lz4kds}
 LOG=$MOD/selftest.log
 P=/sys/module/oplus_bsp_hybridswap_zram/parameters
 

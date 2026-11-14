@@ -15,11 +15,12 @@
 #
 # 可选算法：lz4kds lz4kd lz4 zstd lzo lzo-rle lz4hc 842 lz4k zstdn zstdn_o
 
-MOD=/data/adb/modules/lz4kds
+MOD=${MODPATH:-/data/adb/modules/lz4kds}
 CONF=$MOD/payload/driver.conf
 FLAG=$MOD/stock_driver
 DEV=/dev/block/zram0
 PRIO=32758
+MEMINFO=/proc/meminfo
 
 # 读取现有配置
 SIZE=$(sed -n 's/.*zram_size_mb=\([0-9][0-9]*\).*/\1/p' "$CONF" 2>/dev/null | head -1)
@@ -79,7 +80,11 @@ save() {
 	else
 		echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE zram_algo=$ALGO" >"$TMP"
 	fi
-	mv "$TMP" "$CONF"
+	if ! mv "$TMP" "$CONF" 2>/dev/null; then
+		rm -f "$TMP" 2>/dev/null
+		echo "!! 写不进 $CONF，配置未保存"
+		return 1
+	fi
 	chmod 644 "$CONF" 2>/dev/null
 	if [ "$QUIET" = "1" ]; then
 		echo "配置已写入"
@@ -141,7 +146,8 @@ case "$1" in
 *[Gg])
 	N=${1%[Gg]}
 	case "$N" in *[!0-9]*|"") echo "容量格式错误，例如 8192 或 8G"; exit 1 ;; esac
-	SIZE=$((N * 1024))
+	# mksh 的 $(( )) 是 32 位，4194305G 会溢出成 1024 并通过范围校验
+	SIZE=$(awk -v n="$N" 'BEGIN{printf "%.0f", n * 1024}')
 	;;
 *)
 	case "$1" in *[!0-9]*) echo "容量格式错误，例如 8192 或 8G"; exit 1 ;; esac
@@ -157,8 +163,12 @@ if [ -n "$2" ] && [ "${2#--}" = "$2" ]; then
 fi
 
 # 超过 2×物理内存的值在驱动里会被钳制，这里先调整并写回，避免配置与运行不一致
-MAX_MB=$(awk '/MemTotal/ {printf "%d", $2 * 2 / 1024}' /proc/meminfo)
-if [ "$SIZE" -gt "$MAX_MB" ]; then
+# meminfo 读不到时不做钳制，免得把空值写进配置
+MAX_MB=$(awk '/MemTotal/ {printf "%d", $2 * 2 / 1024}' "$MEMINFO" 2>/dev/null)
+case "$MAX_MB" in
+'' | *[!0-9]*) MAX_MB=0 ;;
+esac
+if [ "$MAX_MB" -gt 0 ] && [ "$SIZE" -gt "$MAX_MB" ]; then
 	echo "!! 容量 ${SIZE} MiB 超过 2×物理内存上限，已调整为 ${MAX_MB} MiB"
 	SIZE=$MAX_MB
 fi
@@ -196,23 +206,36 @@ fi
 CUR_MB=$(awk -v c="$CUR" 'BEGIN{printf "%d", c/1048576}')
 PRE_ALGO=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' /sys/block/zram0/comp_algorithm 2>/dev/null)
 echo "正在切换：$CUR_MB MiB -> $TGT_MB MiB，算法 $ALGO"
-# 先同步驱动参数，否则 disksize_store 会拿旧的 zram_size_mb 覆盖本次容量
-echo "$TGT_MB" >/sys/module/oplus_bsp_hybridswap_zram/parameters/zram_size_mb 2>/dev/null
-swapoff $DEV || {
+# 先同步驱动参数，否则 disksize_store 会拿旧的 zram_size_mb 覆盖本次容量。
+# 后面 swapoff 失败要把它改回去，否则本次会话里参数和实际容量不一致。
+PARAM=/sys/module/oplus_bsp_hybridswap_zram/parameters/zram_size_mb
+OLD_PARAM=$(cat "$PARAM" 2>/dev/null)
+echo "$TGT_MB" >"$PARAM" 2>/dev/null
+if ! swapoff $DEV; then
+	echo "$OLD_PARAM" >"$PARAM" 2>/dev/null
 	echo "!! swapoff 失败；配置已保存，重启后生效"
 	exit 0
-}
+fi
 
 echo 1 >/sys/block/zram0/reset
 # nodegrade 只用于挡 vendor 开机脚本的 lz4 降级；手动切换时先放开，避免选了 lz4 又被忽略
 echo 0 >/sys/module/oplus_bsp_hybridswap_zram/parameters/lz4kds_nodegrade 2>/dev/null
 echo "$ALGO" >/sys/block/zram0/comp_algorithm || echo "算法写入失败（可能未编译进模块）"
 echo 1 >/sys/module/oplus_bsp_hybridswap_zram/parameters/lz4kds_nodegrade 2>/dev/null
-echo "$TGT_BYTES" >/sys/block/zram0/disksize
+if ! echo "$TGT_BYTES" >/sys/block/zram0/disksize 2>/dev/null; then
+	echo "!! 写 disksize 失败，回滚原容量"
+	echo 1 >/sys/block/zram0/reset
+	[ -n "$PRE_ALGO" ] && echo "$PRE_ALGO" >/sys/block/zram0/comp_algorithm
+	[ -n "$CUR" ] && echo "$CUR" >/sys/block/zram0/disksize
+	mkswap $DEV >/dev/null 2>&1
+	swapon -p $PRIO $DEV
+	echo "已回滚：disksize=$(cat /sys/block/zram0/disksize)"
+	exit 1
+fi
 mkswap $DEV >/dev/null 2>&1
 if swapon -p $PRIO $DEV 2>/dev/null; then
 	NOW_ALGO=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' /sys/block/zram0/comp_algorithm 2>/dev/null)
-	echo "已生效：容量 $TGT_MB MiB，算法 $NOW_ALGO"
+	echo "已生效：容量 $(awk -v d="$(cat /sys/block/zram0/disksize)" 'BEGIN{printf "%d", d/1048576}') MiB，算法 $NOW_ALGO"
 else
 	echo "swapon 失败，回滚原容量"
 	# 设备此时已 init，直接写 comp_algorithm / disksize 会 EBUSY，必须先 reset

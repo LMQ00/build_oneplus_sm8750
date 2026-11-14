@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # LZ4KDS WebUI 后端：供 webroot/index.html 调用
-MOD=/data/adb/modules/lz4kds
+MOD=${MODPATH:-/data/adb/modules/lz4kds}
 S=/sys/block/zram0/sddc_stat
 P=/sys/module/oplus_bsp_hybridswap_zram/parameters
 
