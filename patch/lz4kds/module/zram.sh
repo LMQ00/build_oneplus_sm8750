@@ -10,28 +10,16 @@
 #   sh zram.sh show              查看配置与运行状态
 #   sh zram.sh off               恢复厂商默认（不干预容量和算法）
 #   sh zram.sh 8192 --reboot     只写配置，不做热切换
+#   sh zram.sh stock             下次开机用厂商驱动
+#   sh zram.sh ours              下次开机用 LZ4KDS 驱动
 #
 # 可选算法：lz4kds lz4kd lz4 zstd lzo lzo-rle lz4hc 842 lz4k zstdn zstdn_o
 
 MOD=/data/adb/modules/lz4kds
-CONF=$MOD/preinit/preinit.conf
-META=/metadata/vold/ksu/preinit/lz4kds/preinit.conf
-KS=/data/adb/ksu/bin/ksud
+CONF=$MOD/payload/driver.conf
+FLAG=$MOD/stock_driver
 DEV=/dev/block/zram0
 PRIO=32758
-
-# 源文件与 metadata 副本不一致时自动 refresh，不再只提示
-sync_meta() {
-	cmp -s "$CONF" "$META" 2>/dev/null && return 0
-	echo "检测到源文件与 metadata 不一致，自动执行 refresh ..."
-	$KS initrc refresh >/dev/null 2>&1
-	cmp -s "$CONF" "$META" 2>/dev/null && {
-		echo "已同步到 metadata。"
-		return 0
-	}
-	echo "!! 自动同步失败，请手动执行: ksud initrc refresh"
-	return 1
-}
 
 # 读取现有配置
 SIZE=$(sed -n 's/.*zram_size_mb=\([0-9][0-9]*\).*/\1/p' "$CONF" 2>/dev/null | head -1)
@@ -40,11 +28,20 @@ ALGO=$(sed -n 's/.*zram_algo=\([A-Za-z0-9_-][A-Za-z0-9_-]*\).*/\1/p' "$CONF" 2>/
 [ -n "$ALGO" ] || ALGO=lz4kds
 
 show() {
-	sync_meta
-	echo "== 配置（源文件）"
+	echo "== 配置"
 	cat "$CONF" 2>/dev/null
-	echo "== 配置（metadata 副本，preinit 实际读取）"
-	cat "$META" 2>/dev/null
+
+	echo "== 驱动"
+	if [ -f "$FLAG" ]; then
+		echo "下次开机 : 厂商驱动（$FLAG 存在）"
+	else
+		echo "下次开机 : LZ4KDS 驱动"
+	fi
+	if [ -e /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_codec ]; then
+		echo "当前     : LZ4KDS 驱动"
+	else
+		echo "当前     : 厂商驱动"
+	fi
 
 	DS=$(cat /sys/block/zram0/disksize 2>/dev/null)
 	echo "== 运行状态"
@@ -77,25 +74,18 @@ valid_algo() {
 
 save() {
 	TMP=$CONF.tmp
-	{
-		echo "insmod oplus_bsp_zsmalloc.ko"
-		if [ "$SIZE" = 0 ]; then
-			echo "insmod oplus_bsp_hybridswap_zram.ko zram_algo=$ALGO"
-		else
-			echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE zram_algo=$ALGO"
-		fi
-	} >"$TMP" && mv "$TMP" "$CONF"
-	chmod 644 "$CONF" 2>/dev/null
-	$KS initrc refresh >/dev/null 2>&1
-	if cmp -s "$CONF" "$META" 2>/dev/null; then
-		if [ "$QUIET" = "1" ]; then
-			echo "配置已写入"
-		else
-			echo "已保存并同步到 metadata（重启后生效）："
-			cat "$CONF"
-		fi
+	if [ "$SIZE" = 0 ]; then
+		echo "insmod oplus_bsp_hybridswap_zram.ko zram_algo=$ALGO" >"$TMP"
 	else
-		echo "!! 保存成功但同步失败，请手动执行: ksud initrc refresh"
+		echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE zram_algo=$ALGO" >"$TMP"
+	fi
+	mv "$TMP" "$CONF"
+	chmod 644 "$CONF" 2>/dev/null
+	if [ "$QUIET" = "1" ]; then
+		echo "配置已写入"
+	else
+		echo "已保存（重启后生效）："
+		cat "$CONF"
 	fi
 }
 
@@ -114,6 +104,16 @@ TGT_MB=
 case "$1" in
 "" | show)
 	show
+	exit 0
+	;;
+stock)
+	: >"$FLAG"
+	echo "下次开机用厂商驱动（标志文件 $FLAG）"
+	exit 0
+	;;
+ours)
+	rm -f "$FLAG"
+	echo "下次开机用 LZ4KDS 驱动"
 	exit 0
 	;;
 off)

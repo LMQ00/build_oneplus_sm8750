@@ -62,6 +62,13 @@ make -C "$WORK/hybridswap_zram" \
 KO="$WORK/hybridswap_zram/oplus_bsp_hybridswap_zram.ko"
 [ -f "$KO" ] || fail "没有产出 ${KO}"
 
+# 驱动导出的符号会被三个厂商模块引用，它们的 __versions 里存着原厂 KO 的 CRC。
+# 原厂 KO 出自 realme 的 OEM 变体内核树，同一份函数签名在那边算出的 CRC 与 GKI
+# 树不同；这里把原厂值写回 __kcrctab，否则侧载后这三个模块会拒绝加载。
+echo "== 对齐导出符号 CRC（对齐设备原厂 KO）=="
+python3 "$(dirname "$0")/fix_export_crc.py" "$KO" "$(dirname "$0")/../abi/exported_symbol_crc.tsv" \
+	|| fail "导出符号 CRC 对齐失败"
+
 echo "== 产物校验 =="
 for algo in lz4k lz4kd lz4kds; do
 	strings "$KO" | grep -qx "$algo" || fail "产物里找不到压缩后端 ${algo}"

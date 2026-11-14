@@ -1,0 +1,8 @@
+# 设备原厂 oplus_bsp_hybridswap_zram.ko 导出的符号 CRC
+# 来源：/vendor_dlkm/lib/modules/oplus_bsp_hybridswap_zram.ko 的 __kcrctab_gpl 段
+# 每一行：<crc(hex)>\t<symbol>；本仓库构建出的 KO 必须导出同样的值
+0x6707077b	free_zram_is_ok
+0x624f07cb	get_mem_cgroup_app_name
+0xd4be919d	get_mem_cgroup_app_uid
+0x5479186f	get_next_memcg
+0x3456ab52	get_next_memcg_break

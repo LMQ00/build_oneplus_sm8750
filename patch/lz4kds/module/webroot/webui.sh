@@ -12,8 +12,8 @@ case "$1" in
 status)
 	echo "disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)"
 	echo "comp=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' /sys/block/zram0/comp_algorithm 2>/dev/null)"
-	echo "cfg_size=$(sed -n 's/.*zram_size_mb=\([0-9][0-9]*\).*/\1/p' "$MOD/preinit/preinit.conf" 2>/dev/null | head -1)"
-	echo "cfg_algo=$(sed -n 's/.*zram_algo=\([A-Za-z0-9_-]*\).*/\1/p' "$MOD/preinit/preinit.conf" 2>/dev/null | head -1)"
+	echo "cfg_size=$(sed -n 's/.*zram_size_mb=\([0-9][0-9]*\).*/\1/p' "$MOD/payload/driver.conf" 2>/dev/null | head -1)"
+	echo "cfg_algo=$(sed -n 's/.*zram_algo=\([A-Za-z0-9_-]*\).*/\1/p' "$MOD/payload/driver.conf" 2>/dev/null | head -1)"
 	echo "swap_used=$(awk '/zram0/ {print $4}' /proc/swaps 2>/dev/null)"
 	echo "swap_total=$(awk '/zram0/ {print $3}' /proc/swaps 2>/dev/null)"
 	echo "enabled=$(getstat enabled)"
