@@ -133,10 +133,11 @@ algo)
 	ALGO=$2
 	# 只换算法：热切换沿用当前运行容量，持久配置里的容量保持不变
 	KEEP_SIZE=1
-	if [ -s /sys/block/zram0/disksize ]; then
-		TGT_MB=$(awk -v d="$(cat /sys/block/zram0/disksize)" \
-			'BEGIN{printf "%d", d/1048576}')
-	fi
+	CUR_BYTES=$(cat /sys/block/zram0/disksize 2>/dev/null)
+	case "$CUR_BYTES" in
+	'' | *[!0-9]*) : ;;
+	*) TGT_MB=$(awk -v d="$CUR_BYTES" 'BEGIN{printf "%d", d/1048576}') ;;
+	esac
 	;;
 esac
 
@@ -203,7 +204,10 @@ if [ -n "$SWAP_USED" ] && [ "$SWAP_USED" != "0" ]; then
 	fi
 fi
 
-CUR_MB=$(awk -v c="$CUR" 'BEGIN{printf "%d", c/1048576}')
+case "$CUR" in
+'' | *[!0-9]*) CUR_MB=0 ;;
+*) CUR_MB=$(awk -v c="$CUR" 'BEGIN{printf "%d", c/1048576}') ;;
+esac
 PRE_ALGO=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' /sys/block/zram0/comp_algorithm 2>/dev/null)
 echo "正在切换：$CUR_MB MiB -> $TGT_MB MiB，算法 $ALGO"
 # 先同步驱动参数，否则 disksize_store 会拿旧的 zram_size_mb 覆盖本次容量。
