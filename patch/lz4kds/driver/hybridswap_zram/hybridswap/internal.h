@@ -464,6 +464,7 @@ void hybridswap_extent_exception(enum hybridswap_scene scene,
 void hybridswap_mgr_deinit(struct zram *zram);
 struct mem_cgroup *hybridswap_zram_get_memcg(struct zram *zram, u32 index);
 int hybridswap_schedule_init(void);
+void hybridswap_schedule_deinit(void);
 void __exit hybridswap_global_setting_exit(void);
 void *hybridswap_plug_start(struct hybridswap_io *io_para);
 int hybridswap_read_extent(void *io_handler,

@@ -3047,9 +3047,11 @@ static void __exit zram_exit(void)
 	 * 卸载分三步，顺序都是必须的：
 	 *   1. 停 swapd 线程。它们的执行体在本模块里，且持有 zram 指针，
 	 *      必须在设备销毁前停。
-	 *   2. destroy_devices 释放 zram 页。这条路径要走 hybridswap_untrack，
-	 *      而 hybridswap_untrack 会碰 memcg 上的 hybridswap_cache 对象，
-	 *      所以缓存必须等它跑完再销毁。
+	 *   2. destroy_devices 释放 zram 页与设备本身。
+	 *
+	 * hybridswap_cache 的销毁必须排在最后：memcg 释放会在别的进程退出时
+	 * 异步发生，那时 mem_cgroup_free_hook 要 kmem_cache_free 回这个缓存。
+	 * 缓存一旦先销毁，之后任何一次 memcg 释放都会写进已销毁的 slab。
 	 *   3. hybridswap_exit 注销七个 android_vh 探针与两个 cgroup 文件数组。
 	 *      内核不会因为模块卸载就替我们摘掉注册到别人 tracepoint 上的探针。
 	 */

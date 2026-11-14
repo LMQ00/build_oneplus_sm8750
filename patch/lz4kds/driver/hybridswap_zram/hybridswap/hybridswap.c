@@ -2520,6 +2520,15 @@ static bool hybridswap_global_setting_init(struct zram *zram)
 
 void hybridswap_global_setting_deinit(void)
 {
+	/*
+	 * lpc_timer 的回调在模块里，定时器不删就会在代码段释放之后被触发。
+	 * 这里必须删：hybridswap_core_init 的 bind 失败路径直接调本函数，
+	 * 而那条路径不会经过 hybridswap_global_setting_exit。
+	 */
+	if (global_settings.stat)
+		del_timer_sync(&global_settings.lpc_timer);
+	cancel_work_sync(&global_settings.lpc_work);
+
 	if (global_settings.reclaim_wq)
 		destroy_workqueue(global_settings.reclaim_wq);
 	if (global_settings.stat)
@@ -2539,9 +2548,6 @@ void __exit hybridswap_global_setting_exit(void)
 	if (!global_settings.stat && !global_settings.reclaim_wq)
 		return;
 
-	if (global_settings.stat)
-		del_timer_sync(&global_settings.lpc_timer);
-	cancel_work_sync(&global_settings.lpc_work);
 	hybridswap_global_setting_deinit();
 }
 
@@ -2566,6 +2572,8 @@ static int hybridswap_core_init(struct zram *zram)
 	if (unlikely(ret)) {
 		log_err("bind storage device failed! %d\n", ret);
 		hybridswap_global_setting_deinit();
+
+		return ret;
 	}
 
 	return 0;
@@ -2869,6 +2877,14 @@ void hybridswap_core_disable(void)
 {
 	(void)hybridswap_set_enable_init(false);
 	hybridswap_set_enable(false);
+	/*
+	 * hs_swap 是按 zram 容量线性分配的一大块，随 zram 一起消失就再也找不回来。
+	 * 这里释放，调用方保证 zram 还活着。
+	 */
+	if (global_settings.zram && global_settings.zram->hs_swap)
+		hybridswap_mgr_deinit(global_settings.zram);
+
+	hybridswap_schedule_deinit();
 }
 
 #define esentry_extid(e) ((e) >> EXTENT_SHIFT)
@@ -4477,6 +4493,25 @@ static int hybridswap_io_extent(void *io_handler,
 	}
 
 	return 0;
+}
+
+void hybridswap_schedule_deinit(void)
+{
+	if (!hybridswap_schedule_init_flag)
+		return;
+
+	/*
+	 * destroy_workqueue 会等在跑与排队中的 work 结束。这些 work 的执行体在
+	 * 模块里，必须在代码段释放前销毁。
+	 */
+	if (hybridswap_proc_write_workqueue)
+		destroy_workqueue(hybridswap_proc_write_workqueue);
+	if (hybridswap_proc_read_workqueue)
+		destroy_workqueue(hybridswap_proc_read_workqueue);
+
+	hybridswap_proc_write_workqueue = NULL;
+	hybridswap_proc_read_workqueue = NULL;
+	hybridswap_schedule_init_flag = false;
 }
 
 int hybridswap_schedule_init(void)
