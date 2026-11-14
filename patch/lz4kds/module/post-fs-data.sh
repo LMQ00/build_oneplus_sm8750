@@ -14,7 +14,7 @@
 # 想临时用回厂商驱动：sh zram.sh stock；改回来：sh zram.sh ours。
 
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
-LOG=$MOD/hotswap.log
+LOG=$MOD/driver.log
 KO=$MOD/payload/oplus_bsp_hybridswap_zram.ko
 CONF=$MOD/payload/driver.conf
 FLAG=$MOD/stock_driver
