@@ -39,10 +39,10 @@ log() {
 # 不直接写 2>>"$LOG"：mksh 里重定向失败会让命令根本不执行，
 # 那样 rmmod 会静默跳过、insmod 也会静默跳过。
 run() {
-	out=$("$@" 2>&1)
-	rc=$?
-	[ -n "$out" ] && log "  $out"
-	return $rc
+	_run_out=$("$@" 2>&1)
+	_run_rc=$?
+	[ -n "$_run_out" ] && log "  $_run_out"
+	return $_run_rc
 }
 
 loaded() {

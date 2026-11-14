@@ -92,6 +92,7 @@ save() {
 		echo "已保存（重启后生效）："
 		cat "$CONF"
 	fi
+	return 0
 }
 
 REBOOT_ONLY=0
@@ -157,6 +158,10 @@ case "$1" in
 	;;
 esac
 # 比较也走 awk：mksh 的 test 是 32 位，4294968320 会被截成 1024 放行
+if ! command -v awk >/dev/null 2>&1; then
+	echo "!! 缺少 awk，无法校验容量"
+	exit 1
+fi
 IN_RANGE=$(awk -v s="$SIZE" 'BEGIN{print (s >= 512 && s <= 65536) ? 1 : 0}')
 [ "$IN_RANGE" = "1" ] || { echo "容量范围 512-65536 MB"; exit 1; }
 
