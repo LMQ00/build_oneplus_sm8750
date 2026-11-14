@@ -20,8 +20,10 @@ modpost 用 genksyms 递归展开签名算 CRC，展开结果取决于签名里�
 """
 import argparse
 import os
+import stat
 import struct
 import sys
+import tempfile
 
 SHT_SYMTAB = 2
 ELF_HEADER_SIZE = 64
@@ -59,6 +61,12 @@ def parse_reference(path):
     return ref
 
 
+def check_range(data, sec, what):
+    if sec["offset"] + sec["size"] > len(data):
+        raise BadInput("%s 越过文件尾（offset=0x%x size=0x%x）"
+                       % (what, sec["offset"], sec["size"]))
+
+
 def read_sections(data):
     if data[:4] != b"\x7fELF":
         raise BadInput("不是 ELF 文件")
@@ -90,14 +98,15 @@ def read_sections(data):
         )
 
     strtab = sections[e_shstrndx]
-    if strtab["offset"] + strtab["size"] > len(data):
-        raise BadInput("节名字符串表越过文件尾")
+    check_range(data, strtab, "节名字符串表")
 
     for sec in sections:
         start = strtab["offset"] + sec["name_off"]
         if start >= len(data):
-            raise BadInput("节名偏移越界")
-        end = data.index(b"\0", start)
+            raise BadInput("节名偏移越界：0x%x" % start)
+        end = data.find(b"\0", start)
+        if end < 0:
+            raise BadInput("节名没有终止符：0x%x" % start)
         sec["name"] = data[start:end].decode("utf-8", "replace")
 
     return sections
@@ -108,7 +117,11 @@ def read_symbols(data, sections):
     for sec in sections:
         if sec["typ"] != SHT_SYMTAB:
             continue
+        check_range(data, sec, ".symtab")
+        if sec["link"] >= len(sections):
+            raise BadInput(".symtab 的字符串表索引越界：%d" % sec["link"])
         strtab = sections[sec["link"]]
+        check_range(data, strtab, ".symtab 的字符串表")
         for i in range(sec["size"] // 24):
             off = sec["offset"] + i * 24
             name_off, _info, _other, shndx, value, _size = struct.unpack_from(
@@ -116,8 +129,10 @@ def read_symbols(data, sections):
             )
             start = strtab["offset"] + name_off
             if start >= len(data):
-                raise BadInput("符号名偏移越界")
-            end = data.index(b"\0", start)
+                raise BadInput("符号名偏移越界：0x%x" % start)
+            end = data.find(b"\0", start)
+            if end < 0:
+                raise BadInput("符号名没有终止符：0x%x" % start)
             out.append(dict(name=data[start:end].decode("utf-8", "replace"),
                             shndx=shndx, value=value))
     return out
@@ -132,9 +147,31 @@ def read_export_names(data, sections):
     for sec in sections:
         if sec["name"] != "__ksymtab_strings":
             continue
+        check_range(data, sec, "__ksymtab_strings")
         blob = data[sec["offset"]:sec["offset"] + sec["size"]]
         return {part.decode("utf-8", "replace") for part in blob.split(b"\0") if part}
     return set()
+
+
+def write_back(path, data, mode):
+    """先写同目录的临时文件再替换，保留原文件的权限位。
+
+    path 可能是指向真实 KO 的符号链接，直接 os.replace 会把链接本身换成普通文件、
+    真正那个文件一个字节都不动，所以先解到真实路径。
+    """
+    target = os.path.realpath(path)
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(target) or ".",
+                                  prefix=os.path.basename(target) + ".",
+                                  suffix=".crc.tmp")
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(bytes(data))
+        os.chmod(tmp, stat.S_IMODE(mode))
+        os.replace(tmp, target)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def main():
@@ -148,11 +185,12 @@ def main():
         ref = parse_reference(args.reference)
         with open(args.ko, "rb") as handle:
             data = bytearray(handle.read())
+        mode = os.stat(args.ko).st_mode
         sections = read_sections(data)
         symbols = read_symbols(data, sections)
         export_names = read_export_names(data, sections)
     except (OSError, ValueError, struct.error, IndexError, BadInput) as exc:
-        print("::error::%s" % exc)
+        print("::error::%s：%s" % (args.ko, exc))
         return 2
 
     if not symbols:
@@ -213,10 +251,11 @@ def main():
         return 1
 
     if fixed and not args.check:
-        tmp = args.ko + ".tmp"
-        with open(tmp, "wb") as handle:
-            handle.write(bytes(data))
-        os.replace(tmp, args.ko)
+        try:
+            write_back(args.ko, data, mode)
+        except OSError as exc:
+            print("::error::写回 %s 失败：%s" % (args.ko, exc))
+            return 2
         print("写回 %s：%d 项" % (args.ko, fixed))
 
     print("导出的符号 CRC 与设备原厂逐条一致")
