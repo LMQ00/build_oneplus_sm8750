@@ -7,9 +7,7 @@
 #define HYBRIDSWAP_H
 extern int __init hybridswap_pre_init(void);
 extern void __exit hybridswap_exit(void);
-#ifdef CONFIG_HYBRIDSWAP_SWAPD
 extern void __exit hybridswap_pre_shutdown(void);
-#endif
 extern ssize_t hybridswap_vmstat_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
 extern ssize_t hybridswap_loglevel_store(struct device *dev,

@@ -1253,7 +1253,8 @@ static void hybridswap_disable(struct zram **zram)
 #endif
 
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
-	hybridswapd_ops->deinit();
+	if (hybridswapd_ops)
+		hybridswapd_ops->deinit();
 #endif
 	hybridswap_enabled = false;
 }
@@ -1408,11 +1409,11 @@ error_out:
 	return ret;
 }
 
-#ifdef CONFIG_HYBRIDSWAP_SWAPD
 /*
- * 关掉 swapd：停掉 hybridswapd:<nid> 线程、注销 memory 与 panel notifier。
- * 这些线程的执行体在本模块里，必须在代码段释放前停掉，而且要在 zram 设备
- * 销毁前停 —— 线程持有 zram 指针。
+ * 卸载前把 hybridswap 关掉：hybridswap_disable 里做 hybridswap_core_disable
+ * 与 hybridswapd_ops->deinit（停 hybridswapd:<nid> 线程、注销 memory 与
+ * panel notifier）。这些线程的执行体在本模块里，且持有 zram 指针，必须在
+ * 设备销毁前停、在代码段释放前停。
  */
 void __exit hybridswap_pre_shutdown(void)
 {
@@ -1421,7 +1422,6 @@ void __exit hybridswap_pre_shutdown(void)
 
 	hybridswap_disable(zram_arr);
 }
-#endif
 
 void __exit hybridswap_exit(void)
 {

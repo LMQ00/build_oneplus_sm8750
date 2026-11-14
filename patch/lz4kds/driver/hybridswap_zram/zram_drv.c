@@ -3054,9 +3054,7 @@ static void __exit zram_exit(void)
 	 *      内核不会因为模块卸载就替我们摘掉注册到别人 tracepoint 上的探针。
 	 */
 #ifdef CONFIG_HYBRIDSWAP
-#ifdef CONFIG_HYBRIDSWAP_SWAPD
 	hybridswap_pre_shutdown();
-#endif
 #endif
 	destroy_devices();
 #ifdef CONFIG_HYBRIDSWAP
