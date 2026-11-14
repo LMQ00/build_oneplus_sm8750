@@ -13,6 +13,7 @@
 #include <linux/version.h>
 #include <linux/mm.h>
 #include <linux/memcontrol.h>
+#include <linux/cgroup.h>
 #include <linux/swap.h>
 #include <linux/blkdev.h>
 #include <linux/cred.h>
@@ -436,13 +437,18 @@ static void unregister_all_hook(void)
 	UNREGISTER_HOOK(mem_cgroup_free);
 	UNREGISTER_HOOK(mem_cgroup_css_offline);
 	UNREGISTER_HOOK(mem_cgroup_css_online);
+#ifdef CONFIG_CONT_PTE_HUGEPAGE
+	unregister_trace_android_vh_si_meminfo_adjust(oplus_mm_common_hook, NULL);
+#endif
 #ifdef CONFIG_HYBRIDSWAP_CORE
 	UNREGISTER_HOOK(mem_cgroup_id_remove);
 #endif
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 	/* UNREGISTER_HOOK(rmqueue); */
 	UNREGISTER_HOOK(tune_scan_type);
-	unregister_trace_android_vh_alloc_pages_slowpath(hybridswapd_ops->vh_alloc_pages_slowpath, NULL);
+	if (hybridswapd_ops)
+		unregister_trace_android_vh_alloc_pages_slowpath(
+				hybridswapd_ops->vh_alloc_pages_slowpath, NULL);
 #endif
 }
 
@@ -1387,8 +1393,14 @@ fail_out:
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 	hybridswapd_ops->pre_deinit();
 	kfree(hybridswapd_ops);
+	hybridswapd_ops = NULL;
 #endif
 error_out:
+	/*
+	 * 挂上去的 cgroup 文件数组要摘回来。模块初始化失败时 zram_init 会走到
+	 * out_error，模块随即被卸载、代码段释放，留下的数组就是悬空指针。
+	 */
+	cgroup_rm_cftypes(mem_cgroup_hybridswap_legacy_files);
 	if (hybridswap_cache) {
 		kmem_cache_destroy(hybridswap_cache);
 		hybridswap_cache = NULL;
@@ -1401,7 +1413,20 @@ void __exit hybridswap_exit(void)
 	unregister_all_hook();
 
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
-	hybridswapd_ops->pre_deinit();
+	if (hybridswapd_ops)
+		hybridswapd_ops->pre_deinit();
+#endif
+
+	/*
+	 * 两个 cgroup 文件数组分别在 hybridswap_pre_init 与其 swapd 初始化里挂到
+	 * memory_cgrp_subsys。不摘掉的话，模块的代码段被释放后 cgroup 仍然指着
+	 * 这份数组，任何 cgroup 操作都会跳进已释放的内存。
+	 * 数组本身已挂上时返回 0，没挂上时返回 -ENOENT，两种情况都可以忽略。
+	 */
+	cgroup_rm_cftypes(mem_cgroup_hybridswap_legacy_files);
+#ifdef CONFIG_HYBRIDSWAP_SWAPD
+	if (hybridswapd_ops)
+		cgroup_rm_cftypes(hybridswapd_ops->memcg_legacy_files);
 #endif
 
 	if (hybridswap_cache) {

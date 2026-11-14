@@ -11,10 +11,6 @@ if [ ! -f "$MODPATH/payload/oplus_bsp_hybridswap_zram.ko" ]; then
 	ui_print "!! 缺少 oplus_bsp_hybridswap_zram.ko，模块不完整"
 fi
 
-# 旧版本把 KO 交给 KernelSU 的 preinit 加载，那份副本在 /metadata 下会跨版本残留。
-# 驱动现在由 post-fs-data.sh 加载，这里清掉它，避免同一份 KO 被装两次。
-rm -rf /metadata/vold/ksu/preinit/lz4kds
-
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/customize.sh" 0 0 0755
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755

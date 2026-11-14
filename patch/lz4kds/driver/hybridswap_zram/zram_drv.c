@@ -80,8 +80,8 @@ MODULE_PARM_DESC(lz4kds_nodegrade,
 /*
  * Post-load self test results, visible to userspace:
  *   -1 = not run, 0 = passed, negative = failure stage/code.
- * Codec failure aborts module init (preinit falls back to the vendor
- * module); IO failure only disables SDDC and keeps plain lz4kds.
+ * Codec failure aborts module init (insmod fails, the vendor module stays
+ * loaded); IO failure only disables SDDC and keeps plain lz4kds.
  */
 static int selftest_codec __read_mostly = -1;
 module_param(selftest_codec, int, 0444);
@@ -94,7 +94,7 @@ MODULE_PARM_DESC(selftest_io, "LZ4KDS zram IO self test result (-1/0/err)");
 static bool lz4kds_io_checked;
 
 /*
- * 人为设定项，由 preinit.conf 的 insmod 参数传入，也可在 disksize 之前
+ * 人为设定项，由 driver.conf 的 insmod 参数传入，也可在 disksize 之前
  * 通过 /sys/module/.../parameters 修改：
  *   zram_size_mb=8192   zram0 逻辑容量，单位 MiB，填多少就是多少（0=厂商值）
  *   zram_algo=lz4kds    新 zram 设备的默认压缩算法（off=厂商默认）
@@ -2894,7 +2894,7 @@ static struct mtrack_debugger zram_mtrack_debugger = {
 /*
  * Codec-only self test, run before any zram device exists.  It exercises both
  * the plain LZ4KD stream and the SDDC delta stream; a failure refuses the
- * module so the preinit loader falls back to the vendor driver.
+ * module so insmod fails and the vendor driver stays loaded.
  */
 static int lz4kds_codec_selftest(void)
 {
@@ -3043,6 +3043,17 @@ static void __exit zram_exit(void)
 	kcompressd_exit();
 #endif
 	destroy_devices();
+	/*
+	 * 七个 android_vh 探针的回调都在本模块的 .text 里，内核不会因为模块卸载
+	 * 就把它们摘掉，两个 cgroup 文件数组同理。必须显式注销，否则卸载之后
+	 * 任何一次内存回收或 memcg 分配都会跳到已释放的地址上。
+	 *
+	 * 顺序不能反：destroy_devices 释放 zram 页时会走 hybridswap_untrack，
+	 * 那条路径要读 hybridswap_cache，先销毁缓存会踩到已经释放的 slab。
+	 */
+#ifdef CONFIG_HYBRIDSWAP
+	hybridswap_exit();
+#endif
 }
 
 module_init(zram_init);
