@@ -35,6 +35,16 @@ log() {
 	echo "$(date +%H:%M:%S) $*" >>"$LOG" 2>/dev/null
 }
 
+# 跑 insmod / rmmod 并把它们的 stderr 记进日志。
+# 不直接写 2>>"$LOG"：mksh 里重定向失败会让命令根本不执行，
+# 那样 rmmod 会静默跳过、insmod 也会静默跳过。
+run() {
+	out=$("$@" 2>&1)
+	rc=$?
+	[ -n "$out" ] && log "  $out"
+	return $rc
+}
+
 loaded() {
 	grep -qE "^$1 " /proc/modules
 }
@@ -54,7 +64,9 @@ conf_args() {
 			sub(/#.*/, "")
 			gsub(/^[ \t]+|[ \t]+$/, "")
 			n = split($0, a, /[ \t]+/)
-			if (n >= 2 && a[1] == "insmod" && a[2] ~ /oplus_bsp_hybridswap_zram\.ko$/) {
+			# a[2] 可能带目录前缀，只看最后一段是不是这个 KO
+			k = split(a[2], p, "/")
+			if (n >= 2 && a[1] == "insmod" && p[k] == "oplus_bsp_hybridswap_zram.ko") {
 				out = ""
 				for (i = 3; i <= n; i++) out = out (out == "" ? "" : " ") a[i]
 				print out
@@ -67,7 +79,7 @@ conf_args() {
 unload_deps() {
 	for m in $DEPS; do
 		loaded "$m" || continue
-		if rmmod "$m" 2>>"$LOG"; then
+		if run rmmod "$m"; then
 			log "卸下 $m"
 		else
 			log "ERROR: 卸不下 $m"
@@ -82,7 +94,7 @@ load_deps() {
 			log "ERROR: 找不到 $VENDOR/$m.ko"
 			continue
 		fi
-		if insmod "$VENDOR/$m.ko" 2>>"$LOG"; then
+		if run insmod "$VENDOR/$m.ko"; then
 			log "装回 $m"
 		else
 			log "ERROR: 装不回 $m"
@@ -93,7 +105,7 @@ load_deps() {
 # 只剩厂商驱动在跑。我们的驱动卸不掉时明确记一笔，别让日志只剩裸 stderr。
 restore_vendor() {
 	if loaded oplus_bsp_hybridswap_zram; then
-		if rmmod oplus_bsp_hybridswap_zram 2>>"$LOG"; then
+		if run rmmod oplus_bsp_hybridswap_zram; then
 			log "卸下失效的驱动"
 		else
 			log "ERROR: 卸不下 oplus_bsp_hybridswap_zram，厂商驱动装不回来"
@@ -102,10 +114,10 @@ restore_vendor() {
 	fi
 
 	if ! loaded oplus_bsp_zsmalloc && [ -f "$VENDOR/oplus_bsp_zsmalloc.ko" ]; then
-		insmod "$VENDOR/oplus_bsp_zsmalloc.ko" 2>>"$LOG" || log "ERROR: 装不回 zsmalloc"
+		run insmod "$VENDOR/oplus_bsp_zsmalloc.ko" || log "ERROR: 装不回 zsmalloc"
 	fi
 	if ! loaded oplus_bsp_hybridswap_zram && [ -f "$VENDOR/oplus_bsp_hybridswap_zram.ko" ]; then
-		if insmod "$VENDOR/oplus_bsp_hybridswap_zram.ko" 2>>"$LOG"; then
+		if run insmod "$VENDOR/oplus_bsp_hybridswap_zram.ko"; then
 			log "已装回厂商驱动"
 		else
 			log "ERROR: 厂商驱动装不回"
@@ -149,7 +161,7 @@ main() {
 
 	if loaded oplus_bsp_hybridswap_zram; then
 		unload_deps
-		if ! rmmod oplus_bsp_hybridswap_zram 2>>"$LOG"; then
+		if ! run rmmod oplus_bsp_hybridswap_zram; then
 			log "ERROR: 厂商驱动 rmmod 失败，放弃替换"
 			load_deps
 			return 1
@@ -161,7 +173,7 @@ main() {
 	# 参数里有 * ? [ 时不让 shell 展开成文件名
 	set -f
 	# shellcheck disable=SC2086
-	insmod "$KO" $ARGS 2>>"$LOG"
+	run insmod "$KO" $ARGS
 	RET=$?
 	set +f
 	if [ $RET -ne 0 ]; then

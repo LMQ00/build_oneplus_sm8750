@@ -124,14 +124,15 @@ ours)
 off)
 	SIZE=0
 	ALGO=off
-	save
+	save || exit 1
 	exit 0
 	;;
 algo)
 	[ -n "$2" ] || { echo "用法: sh zram.sh algo <算法名>"; exit 1; }
 	valid_algo "$2" || { echo "不支持的算法: $2"; exit 1; }
 	ALGO=$2
-	# 只换算法：热切换沿用当前运行容量，持久配置里的容量保持不变
+	# 只换算法：热切换沿用当前运行容量，持久配置里的容量保持不变。
+	# conf 里没有容量（跑过 off）时按厂商默认处理，别把 0 写回去。
 	KEEP_SIZE=1
 	CUR_BYTES=$(cat /sys/block/zram0/disksize 2>/dev/null)
 	case "$CUR_BYTES" in
@@ -155,7 +156,9 @@ case "$1" in
 	SIZE=$1
 	;;
 esac
-[ "$SIZE" -ge 512 ] && [ "$SIZE" -le 65536 ] || { echo "容量范围 512-65536 MB"; exit 1; }
+# 比较也走 awk：mksh 的 test 是 32 位，4294968320 会被截成 1024 放行
+IN_RANGE=$(awk -v s="$SIZE" 'BEGIN{print (s >= 512 && s <= 65536) ? 1 : 0}')
+[ "$IN_RANGE" = "1" ] || { echo "容量范围 512-65536 MB"; exit 1; }
 
 # --reboot / --quiet 这类开关不是算法名
 if [ -n "$2" ] && [ "${2#--}" = "$2" ]; then
@@ -176,7 +179,10 @@ fi
 TGT_MB=$SIZE
 fi
 
-save
+# 配置写不进盘时不要继续热切换：本次会话改了、重启又回退，比不改更糟
+if ! save; then
+	exit 1
+fi
 
 if [ -z "$TGT_MB" ] || [ "$TGT_MB" -eq 0 ]; then
 	echo "配置已保存；zram0 未初始化或容量为厂商默认，重启后生效。"
