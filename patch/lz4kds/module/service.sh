@@ -29,6 +29,21 @@ done
 MODE=$(conf_get mode)
 ALGO=$(conf_get algo)
 
+# 开机期间别的脚本可能 reset zram0，reset 会把算法换回驱动默认值。boot 完成后
+# 核对一次，不一致就记进日志，由人决定要不要用 zram.sh 换回来。
+ALGO_SYS=/sys/block/zram0/comp_algorithm
+cur_algo() {
+	sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$ALGO_SYS" 2>/dev/null | head -1
+}
+
+if [ "${MODE:-algo}" = "algo" ] && [ -n "${ALGO:-}" ] && [ "${ALGO:-}" != "off" ] &&
+	[ ! -f "$MOD/stock_driver" ]; then
+	NOW=$(cur_algo)
+	if [ "$NOW" != "$ALGO" ]; then
+		echo "=== 算法被改回 $NOW，配置要的是 $ALGO" >>"$LOG" 2>/dev/null
+	fi
+fi
+
 {
 	echo "=== uptime=$(cut -d' ' -f1 /proc/uptime) build=$(getprop ro.build.version.incremental)"
 	echo "配置: mode=${MODE:-algo} algo=${ALGO:-lz4kd}"
