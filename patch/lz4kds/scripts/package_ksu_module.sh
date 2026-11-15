@@ -3,7 +3,8 @@
 #
 # 用法：package_ksu_module.sh <输出目录>
 #
-# 模块不携带任何 .ko：zram 由厂商模块提供，本模块只改 comp_algorithm。
+# 模块不携带任何 .ko：zram 由厂商模块提供，本模块只改
+# /odm/etc/oplus_mm_config.xml 里的 comp_algorithm。
 set -euo pipefail
 
 OUT="${1:?用法: package_ksu_module.sh <输出目录>}"
@@ -21,9 +22,11 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -r "$MODSRC"/. "$STAGE"/
 
-# 清掉构建残留
+# 清掉构建残留与上机留下的文件
 find "$STAGE" \( -name '*.o' -o -name '*.cmd' -o -name 'Module.symvers*' -o -name '*.ko' \) \
 	-print0 2>/dev/null | xargs -0 -r rm -f
+rm -f "$STAGE"/stock_driver "$STAGE"/driver.log "$STAGE"/selftest.log \
+	"$STAGE"/payload/oplus_mm_config.xml "$STAGE"/payload/oplus_mm_config.orig.xml
 
 chmod 0755 "$STAGE"/customize.sh "$STAGE"/service.sh "$STAGE"/zram.sh \
 	"$STAGE"/post-fs-data.sh "$STAGE"/uninstall.sh "$STAGE"/webroot/webui.sh 2>/dev/null || true

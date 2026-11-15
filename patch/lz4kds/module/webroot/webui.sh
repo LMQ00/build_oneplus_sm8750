@@ -19,12 +19,24 @@ conf_get() {
 	' "$MOD/payload/driver.conf" 2>/dev/null | head -1
 }
 
+# 界面上的算法按钮。驱动只列编译期写死的那几个加上当前在用的那个，
+# 内核注册了但驱动没列的（lz4kd 就是）得从 /proc/crypto 补进来。
+avail_algos() {
+	for a in lz4kd lz4k lz4 zstd lzo lzo-rle zstdn zstdn_o; do
+		if awk -v a="$a" '$1 == "name" && $3 == a { f = 1; exit } END { exit f ? 0 : 1 }' \
+			/proc/crypto 2>/dev/null; then
+			echo "$a"
+		fi
+	done
+}
+
 case "$1" in
 status)
 	echo "disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)"
 	echo "comp=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' /sys/block/zram0/comp_algorithm 2>/dev/null)"
 	echo "cfg_algo=$(conf_get algo)"
-	echo "avail=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null | tr -d '[]\n')"
+	echo "cfg_size=$(conf_get size)"
+	echo "avail=$(avail_algos | tr '\n' ' ')"
 	echo "swap_used=$(awk '/zram0/ {print $4}' /proc/swaps 2>/dev/null)"
 	echo "swap_total=$(awk '/zram0/ {print $3}' /proc/swaps 2>/dev/null)"
 	echo "stock=$([ -f "$MOD/stock_driver" ] && echo 1 || echo 0)"
