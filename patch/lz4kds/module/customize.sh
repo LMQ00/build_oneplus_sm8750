@@ -1,14 +1,13 @@
 #!/system/bin/sh
 # KernelSU 模块安装脚本。只设置权限，不写任何分区。
 
-ui_print "- LZ4KDS 内存压缩（RMX5010 / 6.6.118 专用）"
-ui_print "- 算法来源: Crystal HybridSwap (SDDC) / HiSilicon (LZ4KD)"
-ui_print "- 驱动骨架: OPPO/realme oplus_bsp_hybridswap_zram"
+ui_print "- LZ4KD 内存压缩（RMX5010 / 6.6.118 专用）"
+ui_print "- 算法来源: HiSilicon LZ4KD，由本仓库编译的 Image 提供"
 ui_print "- 改容量与算法: sh /data/adb/modules/lz4kds/zram.sh 16384 lz4kd"
 ui_print "- 查看当前状态: sh /data/adb/modules/lz4kds/zram.sh show"
 
-if [ ! -f "$MODPATH/payload/oplus_bsp_hybridswap_zram.ko" ]; then
-	ui_print "!! 缺少 oplus_bsp_hybridswap_zram.ko，模块不完整"
+if [ ! -e /sys/module/oplus_bsp_hybridswap_zram ]; then
+	ui_print "!! 没有 zram 驱动，模块不会生效"
 fi
 
 set_perm_recursive "$MODPATH" 0 0 0755 0644

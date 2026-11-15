@@ -1,20 +1,19 @@
 #!/system/bin/sh
 # zram 容量 + 压缩算法配置
-# 改完立即尝试热切换；内存不足或设备已满时自动退化为“重启生效”
+# 改完立即尝试热切换；内存不足时自动退化为“重启生效”
 #
 # 用法：
 #   sh zram.sh 8192              改容量并尝试立即生效（内存不足时等重启）
 #   sh zram.sh 8G                同上，单位 GB
-#   sh zram.sh 8192 lz4kds       容量 + 算法
+#   sh zram.sh 8192 lz4kd        容量 + 算法
 #   sh zram.sh algo zstd         只改算法，容量不变
 #   sh zram.sh show              查看配置与运行状态
 #   sh zram.sh off               恢复厂商默认（不干预容量和算法）
 #   sh zram.sh 8192 --reboot     只写配置，不做热切换
 #   sh zram.sh stock             下次开机不写 comp_algorithm
 #   sh zram.sh ours              下次开机照 driver.conf 的 algo 写
-#   sh zram.sh mode algo|replace 下次开机用哪种接管方式
 #
-# 可选算法：lz4kds lz4kd lz4 zstd lzo lzo-rle lz4hc 842 lz4k zstdn zstdn_o
+# 可选算法：lz4kd lz4k lz4 zstd lzo lzo-rle zstdn zstdn_o
 
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
 CONF=$MOD/payload/driver.conf
@@ -24,8 +23,7 @@ PRIO=32758
 MEMINFO=/proc/meminfo
 ALGO_SYS=/sys/block/zram0/comp_algorithm
 
-# 读配置里的一个 key。driver.conf 同时有 algo= 与 insmod 行，
-# 前者是接管算法，后者是 replace 模式的 insmod 参数，两者互不干扰。
+# 读配置里的一个 key
 conf_get() {
 	awk -v k="$1" '
 		{
@@ -42,13 +40,12 @@ conf_get() {
 	' "$CONF" 2>/dev/null | head -1
 }
 
-# insmod 行里的 zram_size_mb / zram_algo，只给 replace 模式用
-SIZE=$(sed -n 's/.*zram_size_mb=\([0-9][0-9]*\).*/\1/p' "$CONF" 2>/dev/null | head -1)
 ALGO=$(conf_get algo)
-MODE=$(conf_get mode | tr '[:upper:]' '[:lower:]')
-[ -n "$SIZE" ] || SIZE=0
 [ -n "$ALGO" ] || ALGO=lz4kd
-[ -n "$MODE" ] || MODE=algo
+
+cur_algo() {
+	sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$ALGO_SYS" 2>/dev/null | head -1
+}
 
 show() {
 	echo "== 配置"
@@ -57,15 +54,8 @@ show() {
 	echo "== 驱动"
 	if [ -f "$FLAG" ]; then
 		echo "下次开机 : 不动 zram（$FLAG 存在）"
-	elif [ "$MODE" = "replace" ]; then
-		echo "下次开机 : 换成模块自带的驱动"
 	else
-		echo "下次开机 : 厂商驱动 + $ALGO"
-	fi
-	if [ -e /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_codec ]; then
-		echo "当前     : 模块自带的驱动"
-	else
-		echo "当前     : 厂商驱动"
+		echo "下次开机 : 把算法写成 $ALGO"
 	fi
 
 	DS=$(cat /sys/block/zram0/disksize 2>/dev/null)
@@ -77,13 +67,7 @@ show() {
 	fi
 	echo "comp     : $(cat "$ALGO_SYS" 2>/dev/null)"
 	echo "swap     : $(grep zram0 /proc/swaps 2>/dev/null | awk '{print $4" kB used / "$3" kB total"}')"
-	echo "自检     : codec=$(cat /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_codec 2>/dev/null) io=$(cat /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_io 2>/dev/null)"
 
-	# 容量只在 replace 模式下由本模块决定；algo 模式下容量是厂商脚本设的
-	if [ "$MODE" = "replace" ] && [ "${DS_MB:-0}" -gt 0 ] && [ "$SIZE" != 0 ] &&
-		[ "$DS_MB" != "$SIZE" ]; then
-		echo "!! 运行容量 $DS_MB MiB 与配置 $SIZE MiB 不一致：需重启"
-	fi
 	if [ "${DS_MB:-0}" -gt 0 ] && [ "$ALGO" != off ] && [ ! -f "$FLAG" ]; then
 		case "$(cat "$ALGO_SYS" 2>/dev/null)" in
 		*"[$ALGO]"*) : ;;
@@ -96,7 +80,7 @@ show() {
 # 读不到时才只看静态名单。
 valid_algo() {
 	case "$1" in
-	lz4kds|lz4kd|lz4|zstd|lzo|lzo-rle|lz4hc|842|lz4k|zstdn|zstdn_o) : ;;
+	lz4kd|lz4k|lz4|zstd|lzo|lzo-rle|zstdn|zstdn_o) : ;;
 	*) return 1 ;;
 	esac
 	AVAIL=$(cat "$ALGO_SYS" 2>/dev/null | tr -d "[]\n")
@@ -110,29 +94,8 @@ valid_algo() {
 save() {
 	TMP=$CONF.tmp
 	{
-		if [ "$MODE" = "replace" ]; then
-			echo "# 由 zram.sh 写入"
-			echo "algo=$ALGO"
-			echo "mode=replace"
-			# off 是"不干预"，不是算法名，不能进 insmod 参数
-			if [ "$ALGO" = off ]; then
-				if [ "$SIZE" != 0 ]; then
-					echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE"
-				fi
-			elif [ "$SIZE" = 0 ]; then
-				echo "insmod oplus_bsp_hybridswap_zram.ko zram_algo=$ALGO"
-			else
-				echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE zram_algo=$ALGO"
-			fi
-		else
-			echo "# 由 zram.sh 写入"
-			echo "algo=$ALGO"
-			echo "mode=algo"
-			# insmod 行只在 replace 模式生效，留着是为了切过去时容量还在
-			if [ "$SIZE" != 0 ]; then
-				echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE zram_algo=$ALGO"
-			fi
-		fi
+		echo "# 由 zram.sh 写入"
+		echo "algo=$ALGO"
 	} >"$TMP"
 	if ! mv "$TMP" "$CONF" 2>/dev/null; then
 		rm -f "$TMP" 2>/dev/null
@@ -176,19 +139,6 @@ ours)
 	echo "下次开机照 driver.conf 写 comp_algorithm"
 	exit 0
 	;;
-mode)
-	case "$2" in
-	algo | replace)
-		MODE=$2
-		save || exit 1
-		exit 0
-		;;
-	*)
-		echo "用法: sh zram.sh mode algo|replace"
-		exit 1
-		;;
-	esac
-	;;
 off)
 	SIZE=0
 	ALGO=off
@@ -200,7 +150,6 @@ algo)
 	valid_algo "$2" || { echo "不支持的算法: $2"; exit 1; }
 	ALGO=$2
 	# 只换算法：热切换沿用当前运行容量，持久配置里的容量保持不变。
-	# conf 里没有容量（跑过 off）时按厂商默认处理，别把 0 写回去。
 	KEEP_SIZE=1
 	CUR_BYTES=$(cat /sys/block/zram0/disksize 2>/dev/null)
 	case "$CUR_BYTES" in
@@ -286,18 +235,9 @@ case "$CUR" in
 '' | *[!0-9]*) CUR_MB=0 ;;
 *) CUR_MB=$(awk -v c="$CUR" 'BEGIN{printf "%d", c/1048576}') ;;
 esac
-PRE_ALGO=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$ALGO_SYS" 2>/dev/null)
+PRE_ALGO=$(cur_algo)
 echo "正在切换：$CUR_MB MiB -> $TGT_MB MiB，算法 $ALGO"
-# zram_size_mb 只在模块自带的驱动里有。它会让 disksize_store 忽略写入值、
-# 改用参数值，所以热切换前要先同步，swapoff 失败再改回去。
-PARAM=/sys/module/oplus_bsp_hybridswap_zram/parameters/zram_size_mb
-OLD_PARAM=
-if [ -e "$PARAM" ]; then
-	OLD_PARAM=$(cat "$PARAM" 2>/dev/null)
-	echo "$TGT_MB" >"$PARAM" 2>/dev/null
-fi
 if ! swapoff $DEV; then
-	[ -n "$OLD_PARAM" ] && echo "$OLD_PARAM" >"$PARAM" 2>/dev/null
 	echo "!! swapoff 失败；配置已保存，重启后生效"
 	exit 0
 fi

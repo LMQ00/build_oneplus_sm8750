@@ -1,12 +1,11 @@
 #!/system/bin/sh
-# boot 完成后核对算法是否真的生效；没生效就按 zram.sh 的顺序改回来。
+# boot 完成后核对算法是否真的生效；没生效就改回来。
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
 LOG=$MOD/selftest.log
 # 打不开就退到 /dev/null：块重定向失败会让整块一条命令都不执行。
 if ! ( : >>"$LOG" ) 2>/dev/null; then
 	LOG=/dev/null
 fi
-P=/sys/module/oplus_bsp_hybridswap_zram/parameters
 ALGO_SYS=/sys/block/zram0/comp_algorithm
 SWAPS=/proc/swaps
 DISKSIZE=/sys/block/zram0/disksize
@@ -124,9 +123,7 @@ while [ $i -lt 60 ]; do
 	i=$((i + 1))
 done
 
-MODE=$(conf_get mode)
 ALGO=$(conf_get algo)
-[ -n "$MODE" ] || MODE=algo
 [ -n "$ALGO" ] || ALGO=lz4kd
 
 # 厂商的 init 脚本在 22 秒设容量并 swapon，另有脚本在 33 秒前后 reset 一次。
@@ -147,14 +144,9 @@ NOW_MB=$(cur_mb)
 
 {
 	echo "=== uptime=$(cut -d' ' -f1 /proc/uptime) build=$(getprop ro.build.version.incremental)"
-	echo "配置: mode=$MODE algo=$ALGO"
+	echo "配置: algo=$ALGO"
 	echo "运行: disksize=$(cat "$DISKSIZE" 2>/dev/null) comp=$NOW_ALGO"
 	echo "swap: $(grep zram0 "$SWAPS" 2>/dev/null)"
-	if [ -e "$P/selftest_codec" ]; then
-		echo "selftest: codec=$(cat "$P/selftest_codec" 2>/dev/null) io=$(cat "$P/selftest_io" 2>/dev/null)"
-		grep -E "^(enabled|aliases|deltas|saved_bytes|decode_failures|conversion_failures):" \
-			/sys/block/zram0/sddc_stat 2>/dev/null
-	fi
 } >>"$LOG" 2>/dev/null
 
 # swap 已用量超过 64 MiB 时不动手：swapoff 要把那些页全读回内存，有 OOM 风险。
@@ -163,8 +155,7 @@ case "$SWAP_USED" in
 "" | *[!0-9]*) SWAP_USED=0 ;;
 esac
 
-if [ "$MODE" != "algo" ] || [ -f "$MOD/stock_driver" ] || [ "$ALGO" = "off" ] ||
-	[ "$NOW_ALGO" = "$ALGO" ]; then
+if [ -f "$MOD/stock_driver" ] || [ "$ALGO" = "off" ] || [ "$NOW_ALGO" = "$ALGO" ]; then
 	exit 0
 fi
 

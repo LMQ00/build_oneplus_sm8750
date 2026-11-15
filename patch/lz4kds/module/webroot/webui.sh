@@ -1,12 +1,6 @@
 #!/system/bin/sh
 # LZ4KDS WebUI 后端：供 webroot/index.html 调用
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
-S=/sys/block/zram0/sddc_stat
-P=/sys/module/oplus_bsp_hybridswap_zram/parameters
-
-getstat() {
-	grep "^$1:" "$S" 2>/dev/null | awk '{print $2}'
-}
 
 # driver.conf 里 key=value 的值，取第一个匹配
 conf_get() {
@@ -29,23 +23,11 @@ case "$1" in
 status)
 	echo "disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)"
 	echo "comp=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' /sys/block/zram0/comp_algorithm 2>/dev/null)"
-	echo "cfg_size=$(sed -n 's/.*zram_size_mb=\([0-9][0-9]*\).*/\1/p' "$MOD/payload/driver.conf" 2>/dev/null | head -1)"
 	echo "cfg_algo=$(conf_get algo)"
-	echo "cfg_mode=$(conf_get mode)"
 	echo "avail=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null | tr -d '[]\n')"
 	echo "swap_used=$(awk '/zram0/ {print $4}' /proc/swaps 2>/dev/null)"
 	echo "swap_total=$(awk '/zram0/ {print $3}' /proc/swaps 2>/dev/null)"
-	echo "enabled=$(getstat enabled)"
-	echo "aliases=$(getstat aliases)"
-	echo "deltas=$(getstat deltas)"
-	echo "saved=$(getstat saved_bytes)"
-	echo "saved_total=$(getstat saved_bytes_total)"
-	echo "decode_fail=$(getstat decode_failures)"
-	echo "conv_fail=$(getstat conversion_failures)"
-	if [ -e "$P/selftest_codec" ]; then
-		echo "codec=$(cat "$P/selftest_codec" 2>/dev/null)"
-		echo "io=$(cat "$P/selftest_io" 2>/dev/null)"
-	fi
+	echo "stock=$([ -f "$MOD/stock_driver" ] && echo 1 || echo 0)"
 	;;
 apply)
 	MB=$2
@@ -63,7 +45,7 @@ apply)
 		exit 1
 	fi
 	case "$ALGO" in
-	lz4kds|lz4kd|lz4|zstd|lzo|lzo-rle|lz4hc|842|lz4k|zstdn|zstdn_o) : ;;
+	lz4kd|lz4k|lz4|zstd|lzo|lzo-rle|zstdn|zstdn_o) : ;;
 	*)
 		echo "不支持的算法: $ALGO"
 		exit 1

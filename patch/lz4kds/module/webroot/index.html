@@ -214,49 +214,6 @@
   </div>
 </section>
 
-<section class="grid" id="sddcMetrics">
-  <div class="metric">
-    <div class="m-label">相同页复用</div>
-    <div class="m-val" id="alias">-</div>
-    <div class="m-sub">alias，相同内容只存一份</div>
-  </div>
-  <div class="metric">
-    <div class="m-label">相似页增量</div>
-    <div class="m-val" id="delta">-</div>
-    <div class="m-sub">delta，只存与参考页的差异</div>
-  </div>
-  <div class="metric">
-    <div class="m-label">当前节省</div>
-    <div class="m-val" id="saved">-</div>
-    <div class="m-sub">此刻存活对象省下的内存</div>
-  </div>
-  <div class="metric">
-    <div class="m-label">累计节省</div>
-    <div class="m-val" id="savedtotal">-</div>
-    <div class="m-sub">开机以来累计，不回落</div>
-  </div>
-</section>
-
-<section class="card" id="sddcCard">
-  <div class="row">
-    <span>SDDC 相似页压缩</span>
-    <span class="badge warn" id="sddc">-</span>
-  </div>
-  <div class="note" id="sddcdesc">仅在算法为 lz4kds 时启用</div>
-  <div class="row">
-    <span>读回解码失败</span><span id="dec">-</span>
-  </div>
-  <div class="row" id="selfRow">
-    <span>开机自检</span><span id="self">-</span>
-  </div>
-  <div class="row">
-    <span>配置容量</span><span id="cfgsize">-</span>
-  </div>
-  <div class="row">
-    <span>开机接管方式</span><span id="mode">-</span>
-  </div>
-</section>
-
 <section class="card">
   <div class="label">容量（MiB，填多少就是多少）</div>
   <div class="input-wrap">
@@ -398,21 +355,6 @@ function mbFromKB(kb) {
   return n ? (n / 1024).toFixed(0) + ' MiB' : '0 MiB';
 }
 
-function selfState(v) {
-  if (v === '' || v === undefined || v === null) return 'skip';
-  const n = Number(v);
-  /* 只有初值 -1 表示“本次开机未运行”，其它负数都是真实错误码 */
-  if (!Number.isFinite(n) || n === -1) return 'skip';
-  return n === 0 ? 'ok' : 'bad';
-}
-
-function selfLabel(v) {
-  const s = selfState(v);
-  if (s === 'ok') return '通过';
-  if (s === 'bad') return '失败（' + v + '）';
-  return '未运行';
-}
-
 async function refresh() {
   const r = await exec(`sh ${MOD}/webroot/webui.sh status`);
   const m = {};
@@ -424,13 +366,6 @@ async function refresh() {
 
   $('ds').innerHTML = mb(m.disksize);
   $('comp').textContent = m.comp || '-';
-  $('cfgsize').textContent = m.cfg_size ? m.cfg_size + ' MiB' : '厂商默认';
-  $('mode').textContent = m.cfg_mode === 'replace' ? '换成模块自带的驱动' : '只换算法';
-
-  /* SDDC 只有 lz4kds 这一条路径有：算法不是它时，相关面板和统计都不显示 */
-  const sddcOn = m.comp === 'lz4kds';
-  $('sddcMetrics').style.display = sddcOn ? '' : 'none';
-  $('sddcCard').style.display = sddcOn ? '' : 'none';
 
   const avail = (m.avail || '').split(/\s+/).filter(Boolean);
   renderAlgos(avail, m.cfg_algo);
@@ -441,49 +376,8 @@ async function refresh() {
   $('swap').textContent = 'swap ' + mbFromKB(used) + ' / ' + mbFromKB(total);
   $('swapPct').textContent = pct.toFixed(0) + '%';
 
-  const en = m.enabled === '1';
-  const s = $('sddc'), sd = $('sddcdesc');
-  s.textContent = en ? '已启用' : '未启用';
-  s.className = 'badge ' + (en ? 'ok' : 'warn');
-  if (en) {
-    sd.textContent = '已启用：相同页复用 + 相似页增量压缩';
-  } else if (m.comp === 'lz4kds') {
-    sd.textContent = '算法是 lz4kds，但 SDDC 管理器未建立（元数据分配失败）。dmesg | grep -i sddc 可看原因，降低容量后重启即可重试';
-  } else {
-    sd.textContent = '当前算法 ' + (m.comp || '-') + ' 不支持相似页压缩，只有 lz4kds 支持';
-  }
-
-  $('alias').textContent = (m.aliases || 0) + ' 页';
-  $('delta').textContent = (m.deltas || 0) + ' 页';
-  $('saved').innerHTML = mb(m.saved);
-  $('savedtotal').innerHTML = mb(m.saved_total);
-
-  const d = Number(m.decode_fail || 0);
-  const de = $('dec');
-  de.textContent = d + ' 次';
-  de.style.color = d ? 'var(--bad)' : 'var(--ok)';
-
-  /* 自检是自研驱动独有的参数，没有 selftest_codec 就没有这一行 */
-  const se = $('self');
-  if (typeof m.codec !== 'string') {
-    $('selfRow').style.display = 'none';
-  } else {
-    $('selfRow').style.display = '';
-    const cs = selfState(m.codec), rs = selfState(m.io);
-    se.textContent = '压缩 ' + selfLabel(m.codec) + ' · 读写 ' + selfLabel(m.io);
-    se.style.color = (cs === 'bad' || rs === 'bad') ? 'var(--bad)'
-      : (cs === 'ok' && rs === 'ok') ? 'var(--ok)' : 'var(--dim)';
-  }
-
-  if (m.cfg_size && m.disksize &&
-      Math.round(Number(m.disksize) / 1048576) !== Number(m.cfg_size)) {
-    $('cfgsize').style.color = 'var(--warn)';
-  } else {
-    $('cfgsize').style.color = '';
-  }
-
   if (!formFilled) {
-    if (m.cfg_size) $('size').value = m.cfg_size;
+    if (m.disksize) $('size').value = Math.round(Number(m.disksize) / 1048576);
     formFilled = true;
   }
 }

@@ -1,16 +1,19 @@
-# payload 目录
+# 模块的文件构成
 
 | 文件 | 说明 |
 |---|---|
-| `oplus_bsp_hybridswap_zram.ko` | 本仓库 `build_driver.sh` 的产物，`mode=replace` 时装它 |
-| `driver.conf` | 算法、模式与 insmod 参数，由 `zram.sh` 改写 |
+| `post-fs-data.sh` | KernelSU 在 post-fs-data 阶段调用，把 `/sys/block/zram0/comp_algorithm` 写成 `algo` |
+| `service.sh` | 开机完成后核对算法；被别的脚本改掉就改回来 |
+| `zram.sh` | 手动改容量、算法，查看状态 |
+| `driver.conf` | 本目录下的配置，见下表 |
+| `driver.log` / `selftest.log` | 运行日志 |
+| `stock_driver` | 存在时开机不干预，`zram.sh stock` 建它、`zram.sh ours` 删它 |
 
-`driver.conf` 的三个键：
+## driver.conf
 
-| 键 | 取值 | 作用 |
+| 键 | 取值 | 说明 |
 |---|---|---|
-| `algo` | `lz4kd` `lz4kds` `lzo-rle` 等 | `post-fs-data.sh` 写进 `/sys/block/zram0/comp_algorithm` |
-| `mode` | `algo` / `replace` | `algo` 不装卸模块；`replace` 换成上面那个 KO |
-| `insmod ...` | 驱动参数 | 只在 `replace` 模式下生效 |
+| `algo` | 算法名 / `off` | 写进 `comp_algorithm` 的值；`off` 表示不干预 |
 
-zsmalloc 由厂商模块 `/vendor_dlkm/lib/modules/oplus_bsp_zsmalloc.ko` 提供，本模块不携带也不替换它。
+`algo` 必须在 `cat /sys/block/zram0/comp_algorithm` 报出来的列表里。
+`lz4kd` 与 `lz4k` 由内核编译时决定，需要刷本仓库的 Image。
