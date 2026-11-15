@@ -366,9 +366,10 @@ async function refresh() {
 
   $('ds').innerHTML = mb(m.disksize);
   $('comp').textContent = m.comp || '-';
-  $('sub').textContent = m.driver
-    ? 'LZ4KDS + SDDC 压缩 · 驱动 ' + m.driver
-    : 'LZ4KDS + SDDC 压缩 · 驱动未加载';
+  const cur = m.driver || '未加载';
+  $('sub').textContent = (cur === 'LZ4KDS + SDDC'
+    ? 'LZ4KDS + SDDC 压缩 · 自带驱动'
+    : 'LZ4KDS + SDDC 压缩 · 当前 ' + cur + ' 驱动');
 
   const avail = (m.avail || '').split(/\s+/).filter(Boolean);
   renderAlgos(avail, m.cfg_algo);

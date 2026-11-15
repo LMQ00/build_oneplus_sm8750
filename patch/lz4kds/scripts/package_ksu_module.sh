@@ -26,7 +26,8 @@ cp -r "$MODSRC"/. "$STAGE"/
 # 清掉构建残留与上机留下的文件
 find "$STAGE" \( -name '*.o' -o -name '*.cmd' -o -name 'Module.symvers*' -o -name '*.ko' \) \
 	-print0 2>/dev/null | xargs -0 -r rm -f
-rm -f "$STAGE"/stock_driver "$STAGE"/driver.log "$STAGE"/selftest.log "$STAGE"/early.log
+rm -f "$STAGE"/stock_driver "$STAGE"/driver.log "$STAGE"/selftest.log \
+	"$STAGE"/early.log "$STAGE"/early.previous.log
 
 cp "$KODIR/oplus_bsp_hybridswap_zram.ko" "$STAGE/payload/oplus_bsp_hybridswap_zram.ko"
 

@@ -8,6 +8,15 @@ param_get() {
 	awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$PARAMS" 2>/dev/null
 }
 
+# 自带驱动才有 zram_algo 这个参数，厂商那版没有。
+driver_name() {
+	if [ -e /sys/module/oplus_bsp_hybridswap_zram/parameters/zram_algo ]; then
+		echo "LZ4KDS + SDDC"
+	elif [ -e /sys/module/oplus_bsp_hybridswap_zram ]; then
+		echo "厂商"
+	fi
+}
+
 case "$1" in
 status)
 	echo "disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)"
@@ -18,7 +27,7 @@ status)
 	echo "swap_used=$(awk '/zram0/ {print $4}' /proc/swaps 2>/dev/null)"
 	echo "swap_total=$(awk '/zram0/ {print $3}' /proc/swaps 2>/dev/null)"
 	echo "stock=$([ -f "$MOD/stock_driver" ] && echo 1 || echo 0)"
-	echo "driver=$(cat /sys/module/oplus_bsp_hybridswap_zram/version 2>/dev/null)"
+	echo "driver=$(driver_name)"
 	;;
 apply)
 	MB=$2

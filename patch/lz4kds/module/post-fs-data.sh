@@ -3,7 +3,7 @@
 # 保留这个入口只为把 early.log 从 /metadata 复制一份到模块目录，方便查看。
 STAGE=/metadata/watchdog/ksu/lz4kds
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
-if [ -f "$STAGE/early.log" ]; then
-	cp -f "$STAGE/early.log" "$MOD/early.log" 2>/dev/null
-fi
+for f in early.log early.previous.log; do
+	[ -f "$STAGE/$f" ] && cp -f "$STAGE/$f" "$MOD/$f" 2>/dev/null
+done
 exit 0

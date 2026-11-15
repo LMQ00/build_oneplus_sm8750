@@ -7,6 +7,7 @@
 #   sh zram.sh algo <名>  改下次开机用的算法（写 ko_params）
 #   sh zram.sh size <MiB> 改下次开机用的容量（写 ko_params）
 #   sh zram.sh stock      下次开机不接管，走厂商驱动
+#   sh zram.sh ours       下次开机接管
 #
 # 算法可选：lz4kds（带 SDDC）lz4kd（不带 SDDC）off（厂商默认）
 
@@ -14,6 +15,7 @@ MOD=${MODPATH:-/data/adb/modules/lz4kds}
 STAGE=/metadata/watchdog/ksu/lz4kds
 PARAMS=$STAGE/ko_params
 FLAG=$MOD/stock_driver
+MODULE=/sys/module/oplus_bsp_hybridswap_zram
 ALGO_SYS=/sys/block/zram0/comp_algorithm
 SWAPS=/proc/swaps
 DISKSIZE=/sys/block/zram0/disksize
@@ -31,14 +33,20 @@ param_get() {
 	awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$PARAMS" 2>/dev/null
 }
 
+# 自带驱动才有 zram_algo 这个参数，厂商那版没有。
+driver_name() {
+	if [ -e "$MODULE/parameters/zram_algo" ]; then
+		echo "LZ4KDS + SDDC"
+	elif [ -e "$MODULE" ]; then
+		echo "厂商"
+	else
+		echo "未加载"
+	fi
+}
+
 show() {
 	echo "== 驱动"
-	VER=$(cat /sys/module/oplus_bsp_hybridswap_zram/version 2>/dev/null)
-	if [ -n "$VER" ]; then
-		echo "版本 : $VER"
-	else
-		echo "版本 : 未加载"
-	fi
+	echo "当前 : $(driver_name)"
 	if [ -f "$FLAG" ]; then
 		echo "下次开机 : 不接管（$FLAG 存在）"
 	else
@@ -50,12 +58,12 @@ show() {
 	echo "算法 : $(cur_algo)"
 	echo "swap : $(grep zram0 "$SWAPS" 2>/dev/null | awk '{print $4" kB used / "$3" kB total"}')"
 	for p in selftest_codec selftest_io; do
-		v=$(cat "/sys/module/oplus_bsp_hybridswap_zram/parameters/$p" 2>/dev/null)
+		v=$(cat "$MODULE/parameters/$p" 2>/dev/null)
 		[ -n "$v" ] && echo "$p : $v"
 	done
 	if [ -f /sys/block/zram0/sddc_stat ]; then
 		echo "== SDDC"
-		cat /sys/block/zram0/sddc_stat 2>/dev/null | head -12
+		head -12 /sys/block/zram0/sddc_stat 2>/dev/null
 	fi
 }
 
@@ -77,7 +85,11 @@ case "$1" in
 	show
 	;;
 log)
-	cat "$STAGE/early.log" 2>/dev/null || cat "$MOD/early.log" 2>/dev/null || echo "没有日志"
+	if [ -f "$STAGE/early.log" ]; then
+		cat "$STAGE/early.log"
+	else
+		cat "$MOD/early.log" 2>/dev/null || echo "没有日志"
+	fi
 	;;
 algo)
 	[ -n "$2" ] || { echo "用法: sh zram.sh algo <lz4kds|lz4kd|off>"; exit 1; }

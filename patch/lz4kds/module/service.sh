@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # 开机完成后核对 zram0 是否真的跑在我们自己的驱动上。
 #
-# 正常路径是 early-init 把 KO 覆盖进 /vendor_dlkm/lib/modules 再 insmod，
-# 厂商 modprobe 随后跳过。这里只做核对与失败善后，不碰 zram 的算法或容量。
+# 正常路径是 early-init 先装 oplus_bsp_zsmalloc、再 insmod 模块自带的 KO，
+# 厂商 modprobe 随后跳过同名模块。这里只做核对与失败善后，不碰 zram 参数。
 
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
 STAGE=/metadata/watchdog/ksu/lz4kds
@@ -45,25 +45,25 @@ done
 NOW_ALGO=$(cur_algo)
 NOW_DS=$(cat "$DISKSIZE" 2>/dev/null)
 NOW_MB=$(awk -v d="$NOW_DS" 'BEGIN{print (d > 0) ? int(d / 1048576) : 0}')
-VER=$(cat /sys/module/oplus_bsp_hybridswap_zram/version 2>/dev/null)
+ALGO_CFG=$(awk -F= '$1 == "ALGO" { sub(/^[^=]*=/, ""); print; exit }' "$STAGE/ko_params" 2>/dev/null)
 
 {
 	echo "=== uptime=$(cut -d' ' -f1 /proc/uptime) build=$(getprop ro.build.version.incremental)"
-	echo "驱动 : ${VER:-未加载}"
-	echo "运行 : disksize=${NOW_DS:-0} (${NOW_MB} MiB) comp=${NOW_ALGO:-无}"
+	echo "早期 : $(grep -c . "$STAGE/early.log" 2>/dev/null) 行日志，见 $STAGE/early.log"
+	echo "运行 : disksize=${NOW_DS:-0} (${NOW_MB} MiB) comp=${NOW_ALGO:-无} 配置=${ALGO_CFG:-无}"
 	echo "swap : $(grep zram0 "$SWAPS" 2>/dev/null)"
 } >>"$LOG" 2>/dev/null
 
-# KO 没接管成功时 early.sh 会留下这个标记，模块就此停用，走厂商流程。
+# early.sh 失败时会留下这个标记，模块就此停用，走厂商流程。
 if [ -f "$STAGE/disable_pending" ]; then
-	log "=== early-init 接管失败，停用模块"
+	log "=== early-init 接管失败：$(cat "$STAGE/disable_pending" 2>/dev/null)"
 	if /data/adb/ksud module disable lz4kds 2>/dev/null && /data/adb/ksud initrc refresh 2>/dev/null; then
 		rm -f "$STAGE/disable_pending" 2>/dev/null
 		log "=== 模块已停用，修正后在管理器里重新启用并重启"
 	else
 		log "=== 停用失败，保留标记"
 	fi
-	tail -200 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+	tail -60 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
 	exit 0
 fi
 
@@ -73,13 +73,13 @@ fi
 
 if ! grep -q '^oplus_bsp_hybridswap_zram ' /proc/modules; then
 	log "=== 驱动没加载"
-	tail -200 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+	tail -60 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
 	exit 0
 fi
 
-if [ "$NOW_MB" -gt 0 ] && [ "$NOW_ALGO" != "lz4kds" ]; then
-	log "=== 算法是 $NOW_ALGO，不是 lz4kds；看 early.log"
+if [ "$NOW_MB" -gt 0 ] && [ -n "$ALGO_CFG" ] && [ "$NOW_ALGO" != "$ALGO_CFG" ]; then
+	log "=== 算法是 $NOW_ALGO，配置是 $ALGO_CFG；看 early.log"
 fi
 
-tail -200 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+tail -60 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
 exit 0
