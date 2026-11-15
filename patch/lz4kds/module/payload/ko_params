@@ -1,5 +1,7 @@
-# early.sh 传给 insmod 的参数。改完重启生效。
+# early.sh 读的参数。改完重启生效。
 # ALGO 可选：lz4kds（带 SDDC，默认）lz4kd（不带 SDDC）off（厂商默认）
 ALGO=lz4kds
 # zram0 容量，单位 MiB
 SIZE_MB=12288
+# 1 = 开机不接管，等价于 zram.sh stock
+STOCK=0

@@ -26,16 +26,16 @@ cp -r "$MODSRC"/. "$STAGE"/
 # 清掉构建残留与上机留下的文件
 find "$STAGE" \( -name '*.o' -o -name '*.cmd' -o -name 'Module.symvers*' -o -name '*.ko' \) \
 	-print0 2>/dev/null | xargs -0 -r rm -f
-rm -f "$STAGE"/stock_driver "$STAGE"/driver.log "$STAGE"/selftest.log \
-	"$STAGE"/early.log "$STAGE"/early.previous.log
+rm -f "$STAGE"/selftest.log "$STAGE"/early.log "$STAGE"/early.previous.log
 
 cp "$KODIR/oplus_bsp_hybridswap_zram.ko" "$STAGE/payload/oplus_bsp_hybridswap_zram.ko"
 
 chmod 0755 "$STAGE"/customize.sh "$STAGE"/service.sh "$STAGE"/zram.sh \
 	"$STAGE"/post-fs-data.sh "$STAGE"/early.sh "$STAGE"/uninstall.sh \
 	"$STAGE"/webroot/webui.sh 2>/dev/null || true
-chmod 0644 "$STAGE"/module.prop "$STAGE"/payload/driver.conf \
-	"$STAGE"/payload/ko_params "$STAGE"/payload/oplus_bsp_hybridswap_zram.ko 2>/dev/null || true
+chmod 0644 "$STAGE"/module.prop "$STAGE"/payload/ko_params \
+	"$STAGE"/payload/oplus_bsp_hybridswap_zram.ko "$STAGE"/payload/README.md \
+	"$STAGE"/initrc/early.rc "$STAGE"/webroot/index.html 2>/dev/null || true
 
 ZIP="$OUT/lz4kds-ksu-6.6.118.zip"
 rm -f "$ZIP"

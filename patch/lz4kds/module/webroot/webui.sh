@@ -1,7 +1,19 @@
 #!/system/bin/sh
 # LZ4KDS WebUI 后端：供 webroot/index.html 调用
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
-STAGE=/metadata/watchdog/ksu/lz4kds
+
+# ksud 的 early-init 目录随 uapi 版本变：uapi 6 起用 /metadata/vold/ksu。
+stage_dir() {
+	for _d in /metadata/vold/ksu /metadata/watchdog/ksu /metadata/ksu; do
+		[ -d "$_d/lz4kds" ] && { echo "$_d/lz4kds"; return 0; }
+	done
+	for _d in /metadata/vold/ksu /metadata/watchdog/ksu /metadata/ksu; do
+		[ -d "$_d" ] && { echo "$_d/lz4kds"; return 0; }
+	done
+	echo /metadata/vold/ksu/lz4kds
+}
+
+STAGE=$(stage_dir)
 PARAMS=$STAGE/ko_params
 
 param_get() {
@@ -14,6 +26,8 @@ driver_name() {
 		echo "LZ4KDS + SDDC"
 	elif [ -e /sys/module/oplus_bsp_hybridswap_zram ]; then
 		echo "厂商"
+	else
+		echo "未加载"
 	fi
 }
 
@@ -26,15 +40,15 @@ status)
 	echo "avail=lz4kds lz4kd off"
 	echo "swap_used=$(awk '/zram0/ {print $4}' /proc/swaps 2>/dev/null)"
 	echo "swap_total=$(awk '/zram0/ {print $3}' /proc/swaps 2>/dev/null)"
-	echo "stock=$([ -f "$MOD/stock_driver" ] && echo 1 || echo 0)"
+	echo "stock=$([ "$(param_get STOCK)" = "1" ] && echo 1 || echo 0)"
 	echo "driver=$(driver_name)"
 	;;
 apply)
 	MB=$2
 	ALGO=$3
 	case "$MB" in
-	"" | *[!0-9]*)
-		echo "容量必须是数字"
+	"" | 0* | *[!0-9]*)
+		echo "容量必须是十进制数字，且不能有前导零"
 		exit 1
 		;;
 	esac

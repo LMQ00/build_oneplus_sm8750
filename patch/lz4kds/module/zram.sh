@@ -12,13 +12,24 @@
 # 算法可选：lz4kds（带 SDDC）lz4kd（不带 SDDC）off（厂商默认）
 
 MOD=${MODPATH:-/data/adb/modules/lz4kds}
-STAGE=/metadata/watchdog/ksu/lz4kds
-PARAMS=$STAGE/ko_params
-FLAG=$MOD/stock_driver
 MODULE=/sys/module/oplus_bsp_hybridswap_zram
 ALGO_SYS=/sys/block/zram0/comp_algorithm
 SWAPS=/proc/swaps
 DISKSIZE=/sys/block/zram0/disksize
+
+# ksud 的 early-init 目录随 uapi 版本变：uapi 6 起用 /metadata/vold/ksu。
+stage_dir() {
+	for _d in /metadata/vold/ksu /metadata/watchdog/ksu /metadata/ksu; do
+		[ -d "$_d/lz4kds" ] && { echo "$_d/lz4kds"; return 0; }
+	done
+	for _d in /metadata/vold/ksu /metadata/watchdog/ksu /metadata/ksu; do
+		[ -d "$_d" ] && { echo "$_d/lz4kds"; return 0; }
+	done
+	echo /metadata/vold/ksu/lz4kds
+}
+
+STAGE=$(stage_dir)
+PARAMS=$STAGE/ko_params
 
 cur_algo() {
 	sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$ALGO_SYS" 2>/dev/null | head -1
@@ -44,14 +55,19 @@ driver_name() {
 	fi
 }
 
+stock_on() {
+	[ "$(param_get STOCK)" = "1" ]
+}
+
 show() {
 	echo "== 驱动"
 	echo "当前 : $(driver_name)"
-	if [ -f "$FLAG" ]; then
-		echo "下次开机 : 不接管（$FLAG 存在）"
+	if stock_on; then
+		echo "下次开机 : 不接管（ko_params 里 STOCK=1）"
 	else
 		echo "下次开机 : 接管，算法 $(param_get ALGO)，容量 $(param_get SIZE_MB) MiB"
 	fi
+	echo "参数 : $PARAMS"
 
 	echo "== 运行状态"
 	echo "容量 : $(cur_mb) MiB"
@@ -101,17 +117,17 @@ algo)
 	;;
 size)
 	[ -n "$2" ] || { echo "用法: sh zram.sh size <MiB>"; exit 1; }
-	case "$2" in *[!0-9]*) echo "容量必须是数字"; exit 1 ;; esac
+	case "$2" in '' | 0* | *[!0-9]*) echo "容量必须是十进制数字，且不能有前导零"; exit 1 ;; esac
 	IN_RANGE=$(awk -v s="$2" 'BEGIN{print (s >= 512 && s <= 65536) ? 1 : 0}')
 	[ "$IN_RANGE" = "1" ] || { echo "容量范围 512-65536 MiB"; exit 1; }
 	write_param SIZE_MB "$2"
 	;;
 stock)
-	: >"$FLAG"
+	write_param STOCK 1 || exit 1
 	echo "下次开机不接管，驱动与参数都走厂商"
 	;;
 ours)
-	rm -f "$FLAG"
+	write_param STOCK 0 || exit 1
 	echo "下次开机接管"
 	;;
 *)
