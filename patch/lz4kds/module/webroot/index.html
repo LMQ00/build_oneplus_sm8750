@@ -175,7 +175,7 @@
 <div class="topbar">
   <div>
     <div class="brand">LZ4KDS <span>内存压缩</span></div>
-    <div class="sub">LZ4KD + LZ4KDS 双引擎 · 侧载 KO，不写分区 · 卸载即还原</div>
+    <div class="sub" id="sub">LZ4KD 压缩 · 只写运行内存，不碰分区</div>
   </div>
   <div class="top-actions">
     <button class="theme-btn" id="themeBtn" onclick="cycleTheme()" title="主题：自动">
@@ -214,7 +214,7 @@
   </div>
 </section>
 
-<section class="grid">
+<section class="grid" id="sddcMetrics">
   <div class="metric">
     <div class="m-label">相同页复用</div>
     <div class="m-val" id="alias">-</div>
@@ -237,7 +237,7 @@
   </div>
 </section>
 
-<section class="card">
+<section class="card" id="sddcCard">
   <div class="row">
     <span>SDDC 相似页压缩</span>
     <span class="badge warn" id="sddc">-</span>
@@ -246,11 +246,14 @@
   <div class="row">
     <span>读回解码失败</span><span id="dec">-</span>
   </div>
-  <div class="row">
+  <div class="row" id="selfRow">
     <span>开机自检</span><span id="self">-</span>
   </div>
   <div class="row">
     <span>配置容量</span><span id="cfgsize">-</span>
+  </div>
+  <div class="row">
+    <span>开机接管方式</span><span id="mode">-</span>
   </div>
 </section>
 
@@ -267,26 +270,8 @@
   </div>
 
   <div class="label">压缩算法</div>
-  <select id="algo" class="hidden-select">
-    <option value="lz4kds">lz4kds</option>
-    <option value="lz4kd">lz4kd</option>
-    <option value="lzo">lzo</option>
-    <option value="lzo-rle">lzo-rle</option>
-    <option value="lz4">lz4</option>
-    <option value="zstd">zstd</option>
-    <option value="zstdn">zstdn</option>
-    <option value="zstdn_o">zstdn_o</option>
-  </select>
-  <div class="seg" id="segAlgo">
-    <button data-v="lz4kds">lz4kds</button>
-    <button data-v="lz4kd">lz4kd</button>
-    <button data-v="lzo">lzo</button>
-    <button data-v="lzo-rle">lzo-rle</button>
-    <button data-v="lz4">lz4</button>
-    <button data-v="zstd">zstd</button>
-    <button data-v="zstdn">zstdn</button>
-    <button data-v="zstdn_o">zstdn_o</button>
-  </div>
+  <select id="algo" class="hidden-select"></select>
+  <div class="seg" id="segAlgo"></div>
 
   <div class="actions">
     <button class="btn primary" onclick="apply()">立即应用</button>
@@ -363,11 +348,44 @@ function markSeg(value) {
   });
 }
 
-document.querySelectorAll('#segAlgo button').forEach(b => {
-  b.addEventListener('click', () => {
-    $('algo').value = b.dataset.v;
-    markSeg(b.dataset.v);
-  });
+/* 算法按钮按设备上报的 comp_algorithm 生成：内核没注册的算法根本不出现。
+   列表变了才重建；列表没变就保留用户已选中的那个，只在他选中的算法
+   已经不在列表里时换成 fallback。 */
+function renderAlgos(list, fallback) {
+  const seg = $('segAlgo'), sel = $('algo');
+  if (!list.length) return;
+  const pick = v => (fallback && list.includes(fallback) ? fallback : (list.includes(v) ? v : list[0]));
+
+  if (seg.dataset.built !== list.join(' ')) {
+    seg.dataset.built = list.join(' ');
+    seg.innerHTML = '';
+    sel.innerHTML = '';
+    list.forEach(name => {
+      const b = document.createElement('button');
+      b.dataset.v = name;
+      b.textContent = name;
+      seg.appendChild(b);
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name;
+      sel.appendChild(o);
+    });
+    sel.value = pick(fallback);
+    markSeg(sel.value);
+    return;
+  }
+
+  if (!list.includes(sel.value)) {
+    sel.value = pick(sel.value);
+    markSeg(sel.value);
+  }
+}
+
+$('segAlgo').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  $('algo').value = b.dataset.v;
+  markSeg(b.dataset.v);
 });
 
 function mb(bytes) {
@@ -407,6 +425,15 @@ async function refresh() {
   $('ds').innerHTML = mb(m.disksize);
   $('comp').textContent = m.comp || '-';
   $('cfgsize').textContent = m.cfg_size ? m.cfg_size + ' MiB' : '厂商默认';
+  $('mode').textContent = m.cfg_mode === 'replace' ? '换成模块自带的驱动' : '只换算法';
+
+  /* SDDC 只有 lz4kds 这一条路径有：算法不是它时，相关面板和统计都不显示 */
+  const sddcOn = m.comp === 'lz4kds';
+  $('sddcMetrics').style.display = sddcOn ? '' : 'none';
+  $('sddcCard').style.display = sddcOn ? '' : 'none';
+
+  const avail = (m.avail || '').split(/\s+/).filter(Boolean);
+  renderAlgos(avail, m.cfg_algo);
 
   const used = Number(m.swap_used || 0), total = Number(m.swap_total || 0);
   const pct = total ? Math.min(100, used / total * 100) : 0;
@@ -436,12 +463,12 @@ async function refresh() {
   de.textContent = d + ' 次';
   de.style.color = d ? 'var(--bad)' : 'var(--ok)';
 
+  /* 自检是自研驱动独有的参数，没有 selftest_codec 就没有这一行 */
   const se = $('self');
-  /* 自检只对 lz4kds 有意义：换了其它算法时不再报“失败/未运行”，直接标为不适用 */
-  if (m.comp !== 'lz4kds') {
-    se.textContent = '当前算法 ' + (m.comp || '-') + ' 无需自检';
-    se.style.color = 'var(--dim)';
+  if (typeof m.codec !== 'string') {
+    $('selfRow').style.display = 'none';
   } else {
+    $('selfRow').style.display = '';
     const cs = selfState(m.codec), rs = selfState(m.io);
     se.textContent = '压缩 ' + selfLabel(m.codec) + ' · 读写 ' + selfLabel(m.io);
     se.style.color = (cs === 'bad' || rs === 'bad') ? 'var(--bad)'
@@ -457,7 +484,6 @@ async function refresh() {
 
   if (!formFilled) {
     if (m.cfg_size) $('size').value = m.cfg_size;
-    if (m.cfg_algo) { $('algo').value = m.cfg_algo; markSeg(m.cfg_algo); }
     formFilled = true;
   }
 }

@@ -1,16 +1,20 @@
 #!/system/bin/sh
-# 开机时把 zram 驱动换成 LZ4KDS 版，不改任何分区。
+# 开机时让 zram0 用上 LZ4KD 压缩。
 #
-# KernelSU 在 post-fs-data 阶段调用本脚本（实测约开机 3.6 秒）。此时厂商驱动已经
-# 加载、zram0 已存在，但 disksize 与 swapon 还没做（这两步在开机 22 秒左右），
-# 换驱动不会丢任何已换出的页。
+# KernelSU 在 post-fs-data 阶段调用本脚本（实测约开机 3.6 秒）。此时厂商驱动
+# 已经加载、zram0 已存在，但 disksize 与 swapon 还没做（这两步在开机 22 秒
+# 左右），comp_algorithm 在这个窗口里可写。
 #
-# 流程：
-#   1. 卸三个依赖模块，让 oplus_bsp_hybridswap_zram 的引用计数归零。
-#   2. 卸厂商驱动，它 destroy_devices() 删掉 zram0。
-#   3. 按 driver.conf 里的参数装我们的驱动，它重建 zram0。
-#   4. 装回三个依赖模块。
-#   任何一步失败都把厂商模块装回去。
+# 两种模式，由 driver.conf 里的 mode 决定：
+#
+#   algo（默认）  不装卸任何模块，只往 /sys/block/zram0/comp_algorithm 写
+#                lz4kd。算法由内核自带（CONFIG_CRYPTO_LZ4KD），厂商驱动自己
+#                就会用它压缩。
+#
+#   replace       卸三个依赖模块 → 卸厂商驱动 → 装本模块的驱动 → 装回依赖。
+#                这个模式能拿到 SDDC 与 lz4kds。厂商驱动的 module_exit 只
+#                删 zram 设备，它注册的七个 android_vh 探针留在内核里，回调
+#                地址指向它已被释放的代码段。
 #
 # 想临时用回厂商驱动：sh zram.sh stock；改回来：sh zram.sh ours。
 
@@ -21,6 +25,7 @@ FLAG=$MOD/stock_driver
 VENDOR=/vendor_dlkm/lib/modules
 SYS=/sys/module/oplus_bsp_hybridswap_zram/parameters
 ZRAM=/dev/block/zram0
+ALGO_SYS=/sys/block/zram0/comp_algorithm
 
 # 日志写不进去时退到 /dev/null。日志路径打不开会让整条命令不执行
 # （mksh 里重定向先于 fork），那样卸模块这一步会被静默跳过。
@@ -56,6 +61,27 @@ ours_active() {
 	[ -e "$SYS/selftest_codec" ]
 }
 
+# 当前生效的压缩算法，从 comp_algorithm 里带方括号的那个取。
+cur_algo() {
+	sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$ALGO_SYS" 2>/dev/null | head -1
+}
+
+# driver.conf 里 key=value 的值，取第一个匹配。
+conf_get() {
+	awk -v k="$1" '
+		{
+			sub(/#.*/, "")
+			gsub(/^[ \t]+|[ \t]+$/, "")
+			if ($0 ~ "^" k "=") {
+				sub("^" k "=", "")
+				gsub(/^[ \t]+|[ \t]+$/, "")
+				print
+				exit
+			}
+		}
+	' "$CONF" 2>/dev/null | head -1
+}
+
 # driver.conf 里 insmod 那一行的参数，原样交给 insmod。
 # 行首空格、多个空格、行尾注释都能处理；取不到就是空串。
 conf_args() {
@@ -74,6 +100,39 @@ conf_args() {
 			}
 		}
 	' "$CONF" 2>/dev/null | head -1
+}
+
+# 只写 comp_algorithm，不碰任何模块。
+# 厂商驱动在 disksize 时用 zram->comp_algs[0] 建 zcomp，所以这里写的值一直
+# 留到 22 秒设容量时才生效。
+apply_algo() {
+	ALGO=$1
+
+	if [ ! -e "$ALGO_SYS" ]; then
+		log "ERROR: 没有 $ALGO_SYS"
+		return 1
+	fi
+
+	NOW=$(cur_algo)
+	if [ "$NOW" = "$ALGO" ]; then
+		log "已经是 $ALGO，不写"
+		return 0
+	fi
+
+	# 设备已初始化时驱动会返回 EBUSY，写入必然失败，先记下现状。
+	if ! echo "$ALGO" >"$ALGO_SYS" 2>/dev/null; then
+		log "ERROR: 写 $ALGO_SYS 失败，当前 $(cur_algo)"
+		return 1
+	fi
+
+	AFTER=$(cur_algo)
+	if [ "$AFTER" != "$ALGO" ]; then
+		log "ERROR: 写完再读是 $AFTER，不是 $ALGO"
+		return 1
+	fi
+
+	log "算法 $NOW -> $ALGO"
+	return 0
 }
 
 unload_deps() {
@@ -102,7 +161,6 @@ load_deps() {
 	done
 }
 
-# 只剩厂商驱动在跑。我们的驱动卸不掉时明确记一笔，别让日志只剩裸 stderr。
 restore_vendor() {
 	if loaded oplus_bsp_hybridswap_zram; then
 		if run rmmod oplus_bsp_hybridswap_zram; then
@@ -132,14 +190,8 @@ rollback() {
 	load_deps
 }
 
-main() {
-	log "=== 开始"
-
-	if [ -f "$FLAG" ]; then
-		log "存在 $FLAG，保持厂商驱动"
-		return 0
-	fi
-
+# 替换驱动。只在 driver.conf 里 mode=replace 时走到这里。
+replace_driver() {
 	if [ ! -f "$KO" ]; then
 		log "ERROR: 缺 $KO"
 		return 1
@@ -150,10 +202,6 @@ main() {
 		return 0
 	fi
 
-	if [ ! -f "$CONF" ]; then
-		log "ERROR: 缺 $CONF"
-		return 1
-	fi
 	ARGS=$(conf_args)
 	if [ -z "$ARGS" ]; then
 		log "WARN: $CONF 里没有可用的 insmod 参数，用驱动默认值"
@@ -188,10 +236,38 @@ main() {
 		return 1
 	fi
 
-	log "接管成功 comp=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null)"
+	log "接管成功 comp=$(cat $ALGO_SYS 2>/dev/null)"
 	log "codec=$(cat "$SYS/selftest_codec" 2>/dev/null)"
 	load_deps
 	return 0
+}
+
+main() {
+	log "=== 开始"
+
+	if [ -f "$FLAG" ]; then
+		log "存在 $FLAG，保持厂商驱动"
+		return 0
+	fi
+
+	MODE=$(conf_get mode | tr '[:upper:]' '[:lower:]')
+	[ -n "$MODE" ] || MODE=algo
+	ALGO=$(conf_get algo)
+	[ -n "$ALGO" ] || ALGO=lz4kd
+
+	log "模式 $MODE 算法 $ALGO"
+
+	if [ "$MODE" = "replace" ]; then
+		replace_driver
+		return $?
+	fi
+
+	if ours_active; then
+		log "已经是我们的驱动，跳过写算法"
+		return 0
+	fi
+
+	apply_algo "$ALGO"
 }
 
 main
