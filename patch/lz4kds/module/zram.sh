@@ -30,9 +30,10 @@ conf_get() {
 	awk -v k="$1" '
 		{
 			sub(/#.*/, "")
+			sub(/\r$/, "")
 			gsub(/^[ \t]+|[ \t]+$/, "")
-			if ($0 ~ "^" k "=") {
-				sub("^" k "=", "")
+			if ($0 ~ "^" k "[ \t]*=") {
+				sub("^" k "[ \t]*=", "")
 				gsub(/^[ \t]+|[ \t]+$/, "")
 				print
 				exit
@@ -79,11 +80,11 @@ show() {
 	echo "自检     : codec=$(cat /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_codec 2>/dev/null) io=$(cat /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_io 2>/dev/null)"
 
 	# 容量只在 replace 模式下由本模块决定；algo 模式下容量是厂商脚本设的
-	if [ "$MODE" = "replace" ] && [ -n "$DS_MB" ] && [ "$SIZE" != 0 ] &&
+	if [ "$MODE" = "replace" ] && [ "${DS_MB:-0}" -gt 0 ] && [ "$SIZE" != 0 ] &&
 		[ "$DS_MB" != "$SIZE" ]; then
 		echo "!! 运行容量 $DS_MB MiB 与配置 $SIZE MiB 不一致：需重启"
 	fi
-	if [ -n "$DS" ] && [ "$ALGO" != off ] && [ ! -f "$FLAG" ]; then
+	if [ "${DS_MB:-0}" -gt 0 ] && [ "$ALGO" != off ] && [ ! -f "$FLAG" ]; then
 		case "$(cat "$ALGO_SYS" 2>/dev/null)" in
 		*"[$ALGO]"*) : ;;
 		*) echo "!! 运行算法与配置 $ALGO 不一致：需重启" ;;
@@ -113,7 +114,12 @@ save() {
 			echo "# 由 zram.sh 写入"
 			echo "algo=$ALGO"
 			echo "mode=replace"
-			if [ "$SIZE" = 0 ]; then
+			# off 是"不干预"，不是算法名，不能进 insmod 参数
+			if [ "$ALGO" = off ]; then
+				if [ "$SIZE" != 0 ]; then
+					echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE"
+				fi
+			elif [ "$SIZE" = 0 ]; then
 				echo "insmod oplus_bsp_hybridswap_zram.ko zram_algo=$ALGO"
 			else
 				echo "insmod oplus_bsp_hybridswap_zram.ko zram_size_mb=$SIZE zram_algo=$ALGO"
@@ -296,35 +302,44 @@ if ! swapoff $DEV; then
 	exit 0
 fi
 
+# 按 reset -> 写算法 -> 写 disksize -> mkswap -> swapon 走一遍。
+# 任何一步失败都要把 zram0 放回可用状态：要么挂上 swap，要么把容量归零，
+# 不能占着内存却没有 swap。
+reset_swap() {
+	R_ALGO=$1
+	R_BYTES=$2
+
+	echo 1 >/sys/block/zram0/reset
+	[ -n "$R_ALGO" ] && echo "$R_ALGO" >"$ALGO_SYS" 2>/dev/null
+	[ -n "$R_BYTES" ] && echo "$R_BYTES" >/sys/block/zram0/disksize 2>/dev/null
+	mkswap $DEV >/dev/null 2>&1
+	if swapon -p $PRIO $DEV 2>/dev/null; then
+		echo "  容量 $(awk -v d="$(cat /sys/block/zram0/disksize)" 'BEGIN{printf "%d", d/1048576}') MiB，算法 $(cur_algo)"
+		return 0
+	fi
+	echo "  swap 也挂不上"
+	return 1
+}
+
 echo 1 >/sys/block/zram0/reset
 if ! echo "$ALGO" >"$ALGO_SYS" 2>/dev/null; then
-	echo "算法 $ALGO 写不进去，保留 $(cat "$ALGO_SYS" 2>/dev/null)"
+	echo "!! 写算法 $ALGO 失败，当前 $(cur_algo)"
 fi
 if ! echo "$TGT_BYTES" >/sys/block/zram0/disksize 2>/dev/null; then
 	echo "!! 写 disksize 失败，回滚原容量"
+	if reset_swap "$PRE_ALGO" "$CUR"; then exit 1; fi
 	echo 1 >/sys/block/zram0/reset
-	[ -n "$PRE_ALGO" ] && echo "$PRE_ALGO" >"$ALGO_SYS"
-	[ -n "$CUR" ] && echo "$CUR" >/sys/block/zram0/disksize
-	mkswap $DEV >/dev/null 2>&1
-	swapon -p $PRIO $DEV
-	echo "已回滚：disksize=$(cat /sys/block/zram0/disksize)"
+	echo "!! 回滚失败，zram0 已重置为 0，重启后恢复"
 	exit 1
 fi
 mkswap $DEV >/dev/null 2>&1
 if swapon -p $PRIO $DEV 2>/dev/null; then
-	NOW_ALGO=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$ALGO_SYS" 2>/dev/null)
-	echo "已生效：容量 $(awk -v d="$(cat /sys/block/zram0/disksize)" 'BEGIN{printf "%d", d/1048576}') MiB，算法 $NOW_ALGO"
-else
-	echo "swapon 失败，回滚原容量"
-	# 设备此时已 init，直接写 comp_algorithm / disksize 会 EBUSY，必须先 reset
-	echo 1 >/sys/block/zram0/reset
-	if [ -n "$PRE_ALGO" ]; then
-		echo "$PRE_ALGO" >"$ALGO_SYS"
-	fi
-	if [ -n "$CUR" ]; then
-		echo "$CUR" >/sys/block/zram0/disksize
-	fi
-	mkswap $DEV >/dev/null 2>&1
-	swapon -p $PRIO $DEV
-	echo "已回滚：disksize=$(cat /sys/block/zram0/disksize)"
+	echo "已生效：容量 $(awk -v d="$(cat /sys/block/zram0/disksize)" 'BEGIN{printf "%d", d/1048576}') MiB，算法 $(cur_algo)"
+	exit 0
 fi
+
+echo "!! swapon 失败，回滚原容量"
+if reset_swap "$PRE_ALGO" "$CUR"; then exit 1; fi
+echo 1 >/sys/block/zram0/reset
+echo "!! 回滚失败，zram0 已重置为 0，重启后恢复"
+exit 1

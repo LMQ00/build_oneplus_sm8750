@@ -13,9 +13,10 @@ conf_get() {
 	awk -v k="$1" '
 		{
 			sub(/#.*/, "")
+			sub(/\r$/, "")
 			gsub(/^[ \t]+|[ \t]+$/, "")
-			if ($0 ~ "^" k "=") {
-				sub("^" k "=", "")
+			if ($0 ~ "^" k "[ \t]*=") {
+				sub("^" k "[ \t]*=", "")
 				gsub(/^[ \t]+|[ \t]+$/, "")
 				print
 				exit
@@ -56,7 +57,8 @@ apply)
 		exit 1
 		;;
 	esac
-	if [ "$MB" -lt 512 ] || [ "$MB" -gt 65536 ]; then
+	# mksh 的 test 是 32 位，大数会被截断后放行；用 awk 比
+	if ! awk -v s="$MB" 'BEGIN{exit !(s >= 512 && s <= 65536)}'; then
 		echo "容量范围 512-65536 MiB"
 		exit 1
 	fi
@@ -64,6 +66,13 @@ apply)
 	lz4kds|lz4kd|lz4|zstd|lzo|lzo-rle|lz4hc|842|lz4k|zstdn|zstdn_o) : ;;
 	*)
 		echo "不支持的算法: $ALGO"
+		exit 1
+		;;
+	esac
+	case "$HOT" in
+	0 | 1) : ;;
+	*)
+		echo "HOT 必须是 0 或 1"
 		exit 1
 		;;
 	esac

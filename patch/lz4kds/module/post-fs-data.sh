@@ -71,9 +71,10 @@ conf_get() {
 	awk -v k="$1" '
 		{
 			sub(/#.*/, "")
+			sub(/\r$/, "")
 			gsub(/^[ \t]+|[ \t]+$/, "")
-			if ($0 ~ "^" k "=") {
-				sub("^" k "=", "")
+			if ($0 ~ "^" k "[ \t]*=") {
+				sub("^" k "[ \t]*=", "")
 				gsub(/^[ \t]+|[ \t]+$/, "")
 				print
 				exit
@@ -135,30 +136,38 @@ apply_algo() {
 	return 0
 }
 
+# 卸依赖。有一个卸不掉就返回 1：带着还在用的依赖去卸厂商驱动必然失败。
 unload_deps() {
+	_rc=0
 	for m in $DEPS; do
 		loaded "$m" || continue
 		if run rmmod "$m"; then
 			log "卸下 $m"
 		else
 			log "ERROR: 卸不下 $m"
+			_rc=1
 		fi
 	done
+	return $_rc
 }
 
 load_deps() {
+	_rc=0
 	for m in $DEPS; do
 		loaded "$m" && continue
 		if [ ! -f "$VENDOR/$m.ko" ]; then
 			log "ERROR: 找不到 $VENDOR/$m.ko"
+			_rc=1
 			continue
 		fi
 		if run insmod "$VENDOR/$m.ko"; then
 			log "装回 $m"
 		else
 			log "ERROR: 装不回 $m"
+			_rc=1
 		fi
 	done
+	return $_rc
 }
 
 restore_vendor() {
@@ -208,7 +217,11 @@ replace_driver() {
 	fi
 
 	if loaded oplus_bsp_hybridswap_zram; then
-		unload_deps
+		if ! unload_deps; then
+			log "ERROR: 依赖卸不干净，放弃替换"
+			load_deps
+			return 1
+		fi
 		if ! run rmmod oplus_bsp_hybridswap_zram; then
 			log "ERROR: 厂商驱动 rmmod 失败，放弃替换"
 			load_deps
@@ -256,6 +269,12 @@ main() {
 	[ -n "$ALGO" ] || ALGO=lz4kd
 
 	log "模式 $MODE 算法 $ALGO"
+
+	# off 是"不干预"，不是算法名
+	if [ "$ALGO" = "off" ]; then
+		log "algo=off，不干预"
+		return 0
+	fi
 
 	if [ "$MODE" = "replace" ]; then
 		replace_driver
