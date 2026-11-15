@@ -79,14 +79,27 @@ NOW_MB=$(cur_mb)
 	fi
 } >>"$LOG" 2>/dev/null
 
-# 只在 algo 模式、没开 stock 标志、算法确实不一致时动手
+# 只在 algo 模式、没开 stock 标志、算法确实不一致时动手。
+# 按 reset -> 写算法 -> 写 disksize -> mkswap -> swapon 的顺序，容量沿用当前值，
+# 不改 driver.conf。
 if [ "$MODE" = "algo" ] && [ ! -f "$MOD/stock_driver" ] &&
 	[ "$ALGO" != "off" ] && [ -n "$NOW_MB" ] && [ "$NOW_MB" -gt 0 ] &&
 	[ "$NOW_ALGO" != "$ALGO" ]; then
 	{
 		echo "=== 算法是 $NOW_ALGO，改回 $ALGO（容量 $NOW_MB MiB）"
-		sh "$MOD/zram.sh" "$NOW_MB" "$ALGO" --quiet 2>&1
-		echo "=== 改完是 $(cur_algo)"
+		BYTES=$(awk -v m="$NOW_MB" 'BEGIN{printf "%.0f", m * 1048576}')
+		# 沿用当前的 swap 优先级，别把 zram0 的优先级改掉
+		PRIO=$(awk '/zram0/ {print $5}' /proc/swaps 2>/dev/null | head -1)
+		case "$PRIO" in
+		"" | *[!0-9-]*) PRIO=-2 ;;
+		esac
+		swapoff /dev/block/zram0 2>&1
+		echo 1 >/sys/block/zram0/reset 2>&1
+		echo "$ALGO" >"$ALGO_SYS" 2>&1
+		echo "$BYTES" >/sys/block/zram0/disksize 2>&1
+		mkswap /dev/block/zram0 2>&1
+		swapon -p "$PRIO" /dev/block/zram0 2>&1
+		echo "=== 改完是 $(cur_algo)，disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)，swapon 优先级 $PRIO"
 	} >>"$LOG" 2>/dev/null
 fi
 
