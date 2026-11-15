@@ -1,9 +1,9 @@
 #!/system/bin/sh
 # 开机时让 zram0 用上 LZ4KD 压缩。
 #
-# KernelSU 在 post-fs-data 阶段调用本脚本（实测约开机 3.6 秒）。此时厂商驱动
-# 已经加载、zram0 已存在，但 disksize 与 swapon 还没做（这两步在开机 22 秒
-# 左右），comp_algorithm 在这个窗口里可写。
+# KernelSU 在 post-fs-data 阶段调用本脚本（dl.log 里 ksud 在开机 6.4 秒起执行，
+# 6.7 秒退出）。此时厂商驱动已经加载、zram0 已存在，但 disksize 与 swapon 还没做
+# （这两步在开机 22 秒左右），comp_algorithm 在这个窗口里可写。
 #
 # 两种模式，由 driver.conf 里的 mode 决定：
 #
