@@ -4,6 +4,7 @@ MOD=${MODPATH:-/data/adb/modules/lz4kds}
 LOG=$MOD/selftest.log
 P=/sys/module/oplus_bsp_hybridswap_zram/parameters
 ALGO_SYS=/sys/block/zram0/comp_algorithm
+SWAPS=/proc/swaps
 
 conf_get() {
 	awk -v k="$1" '
@@ -79,17 +80,23 @@ NOW_MB=$(cur_mb)
 	fi
 } >>"$LOG" 2>/dev/null
 
+# swap 已用量超过 64 MiB 时不做重设：swapoff 要把这些页全读回内存，有 OOM 风险。
+SWAP_USED=$(awk '/zram0/ {print $4}' "$SWAPS" 2>/dev/null | head -1)
+case "$SWAP_USED" in
+"" | *[!0-9]*) SWAP_USED=0 ;;
+esac
+
 # 只在 algo 模式、没开 stock 标志、算法确实不一致时动手。
 # 按 reset -> 写算法 -> 写 disksize -> mkswap -> swapon 的顺序，容量沿用当前值，
 # 不改 driver.conf。
 if [ "$MODE" = "algo" ] && [ ! -f "$MOD/stock_driver" ] &&
 	[ "$ALGO" != "off" ] && [ -n "$NOW_MB" ] && [ "$NOW_MB" -gt 0 ] &&
-	[ "$NOW_ALGO" != "$ALGO" ]; then
+	[ "$NOW_ALGO" != "$ALGO" ] && [ "$SWAP_USED" -le 65536 ]; then
 	{
 		echo "=== 算法是 $NOW_ALGO，改回 $ALGO（容量 $NOW_MB MiB）"
 		BYTES=$(awk -v m="$NOW_MB" 'BEGIN{printf "%.0f", m * 1048576}')
 		# 沿用当前的 swap 优先级，别把 zram0 的优先级改掉
-		PRIO=$(awk '/zram0/ {print $5}' /proc/swaps 2>/dev/null | head -1)
+		PRIO=$(awk '/zram0/ {print $5}' "$SWAPS" 2>/dev/null | head -1)
 		case "$PRIO" in
 		"" | *[!0-9-]*) PRIO=-2 ;;
 		esac
@@ -101,6 +108,8 @@ if [ "$MODE" = "algo" ] && [ ! -f "$MOD/stock_driver" ] &&
 		swapon -p "$PRIO" /dev/block/zram0 2>&1
 		echo "=== 改完是 $(cur_algo)，disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)，swapon 优先级 $PRIO"
 	} >>"$LOG" 2>/dev/null
+elif [ "$MODE" = "algo" ] && [ "$NOW_ALGO" != "$ALGO" ] && [ "$SWAP_USED" -gt 65536 ]; then
+	echo "=== 算法是 $NOW_ALGO，swap 已用 $SWAP_USED kB，不做重设" >>"$LOG" 2>/dev/null
 fi
 
 # 日志只保留最近 200 行
