@@ -5,6 +5,9 @@ LOG=$MOD/selftest.log
 P=/sys/module/oplus_bsp_hybridswap_zram/parameters
 ALGO_SYS=/sys/block/zram0/comp_algorithm
 SWAPS=/proc/swaps
+DISKSIZE=/sys/block/zram0/disksize
+RESET=/sys/block/zram0/reset
+ZRAM=/dev/block/zram0
 
 conf_get() {
 	awk -v k="$1" '
@@ -28,7 +31,7 @@ cur_algo() {
 
 # 当前容量，单位 MiB
 cur_mb() {
-	awk -v d="$(cat /sys/block/zram0/disksize 2>/dev/null)" \
+	awk -v d="$(cat "$DISKSIZE" 2>/dev/null)" \
 		'BEGIN{print (d > 0) ? int(d / 1048576) : 0}'
 }
 
@@ -64,8 +67,8 @@ NOW_MB=$(cur_mb)
 {
 	echo "=== uptime=$(cut -d' ' -f1 /proc/uptime) build=$(getprop ro.build.version.incremental)"
 	echo "配置: mode=$MODE algo=$ALGO"
-	echo "运行: disksize=$(cat /sys/block/zram0/disksize 2>/dev/null) comp=$NOW_ALGO"
-	echo "swap: $(grep zram0 /proc/swaps 2>/dev/null)"
+	echo "运行: disksize=$(cat "$DISKSIZE" 2>/dev/null) comp=$NOW_ALGO"
+	echo "swap: $(grep zram0 "$SWAPS" 2>/dev/null)"
 	if [ -e "$P/selftest_codec" ]; then
 		echo "selftest: codec=$(cat "$P/selftest_codec" 2>/dev/null) io=$(cat "$P/selftest_io" 2>/dev/null)"
 		grep -E "^(enabled|aliases|deltas|saved_bytes|decode_failures|conversion_failures):" \
@@ -93,13 +96,13 @@ if [ "$MODE" = "algo" ] && [ ! -f "$MOD/stock_driver" ] &&
 		case "$PRIO" in
 		"" | *[!0-9-]*) PRIO=-2 ;;
 		esac
-		swapoff /dev/block/zram0 2>&1
-		echo 1 >/sys/block/zram0/reset 2>&1
+		swapoff "$ZRAM" 2>&1
+		echo 1 >"$RESET" 2>&1
 		echo "$ALGO" >"$ALGO_SYS" 2>&1
-		echo "$BYTES" >/sys/block/zram0/disksize 2>&1
-		mkswap /dev/block/zram0 2>&1
-		swapon -p "$PRIO" /dev/block/zram0 2>&1
-		echo "=== 改完是 $(cur_algo)，disksize=$(cat /sys/block/zram0/disksize 2>/dev/null)，swapon 优先级 $PRIO"
+		echo "$BYTES" >"$DISKSIZE" 2>&1
+		mkswap "$ZRAM" 2>&1
+		swapon -p "$PRIO" "$ZRAM" 2>&1
+		echo "=== 改完是 $(cur_algo)，disksize=$(cat "$DISKSIZE" 2>/dev/null)，swapon 优先级 $PRIO"
 	} >>"$LOG" 2>/dev/null
 elif [ "$MODE" = "algo" ] && [ "$NOW_ALGO" != "$ALGO" ] && [ "$SWAP_USED" -gt 65536 ]; then
 	echo "=== 算法是 $NOW_ALGO，swap 已用 $SWAP_USED kB，不做重设" >>"$LOG" 2>/dev/null
