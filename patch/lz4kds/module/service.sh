@@ -41,6 +41,7 @@ if [ "${MODE:-algo}" = "algo" ] && [ -n "${ALGO:-}" ] && [ "${ALGO:-}" != "off" 
 	NOW=$(cur_algo)
 	if [ "$NOW" != "$ALGO" ]; then
 		echo "=== 算法被改回 $NOW，配置要的是 $ALGO" >>"$LOG" 2>/dev/null
+		echo "=== 恢复: sh $MOD/zram.sh <MiB> $ALGO" >>"$LOG" 2>/dev/null
 	fi
 fi
 
