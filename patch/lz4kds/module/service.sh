@@ -46,22 +46,15 @@ ALGO=$(conf_get algo)
 [ -n "$ALGO" ] || ALGO=lz4kd
 
 # 厂商的 init 脚本在 22 秒设容量并 swapon，另有脚本在 33 秒前后 reset 一次。
-# 等这两段都过去再核对，看到的才是最终状态。
-i=0
-while [ $i -lt 60 ]; do
-	[ "$(cur_mb)" -gt 0 ] && break
-	sleep 2
-	i=$((i + 1))
-done
-# 再等到开机满 45 秒，避开 33 秒那次 reset
+# 等到开机 36 秒，reset 刚过去、swap 里还没多少页，这时改的代价最小。
 i=0
 while [ $i -lt 30 ]; do
 	UP=$(cut -d. -f1 /proc/uptime 2>/dev/null)
 	case "$UP" in
 	"" | *[!0-9]*) UP=0 ;;
 	esac
-	[ "$UP" -ge 45 ] && break
-	sleep 2
+	[ "$UP" -ge 36 ] && break
+	sleep 1
 	i=$((i + 1))
 done
 
