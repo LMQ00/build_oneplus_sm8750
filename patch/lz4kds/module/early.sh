@@ -84,9 +84,9 @@ apply_params() {
 		fi
 	fi
 	if [ "$ALGO" = "off" ]; then
-		# 与 insmod 时传 zram_algo=off 等价：放开降级，算法回到内核默认。
+		# 与 insmod 时传 zram_algo=off 等价：不再拦降级，厂商脚本写什么就是什么。
 		printf '0\n' >"$PARAM_DIR/lz4kds_nodegrade" 2>/dev/null || true
-		say "算法交给驱动默认值"
+		say "算法不接管，厂商脚本写什么就用什么"
 		return 0
 	fi
 	if [ -w "$COMP_ALGO" ]; then
