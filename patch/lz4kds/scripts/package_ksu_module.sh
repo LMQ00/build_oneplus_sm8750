@@ -1,13 +1,13 @@
 #!/bin/bash
 # 把模块模板打成可直接刷入的 KernelSU 模块 zip。
 #
-# 用法：package_ksu_module.sh <输出目录>
+# 用法：package_ksu_module.sh <输出目录> <KO 目录>
 #
-# 模块不携带任何 .ko：zram 由厂商模块提供，本模块只改
-# /odm/etc/oplus_mm_config.xml 里的 comp_algorithm。
+# KO 目录里需要有 oplus_bsp_hybridswap_zram.ko（带 LZ4KDS + SDDC 的驱动）。
 set -euo pipefail
 
-OUT="${1:?用法: package_ksu_module.sh <输出目录>}"
+OUT="${1:?用法: package_ksu_module.sh <输出目录> <KO 目录>}"
+KODIR="${2:?用法: package_ksu_module.sh <输出目录> <KO 目录>}"
 MODSRC="$(cd "$(dirname "$0")/.." && pwd)/module"
 
 fail() {
@@ -16,21 +16,25 @@ fail() {
 }
 
 [ -d "$MODSRC" ] || fail "缺少模块模板 ${MODSRC}"
+[ -f "$KODIR/oplus_bsp_hybridswap_zram.ko" ] || fail "${KODIR} 里没有 oplus_bsp_hybridswap_zram.ko"
 
 STAGE="$OUT/lz4kds"
 rm -rf "$STAGE"
-mkdir -p "$STAGE"
+mkdir -p "$STAGE/payload"
 cp -r "$MODSRC"/. "$STAGE"/
 
 # 清掉构建残留与上机留下的文件
 find "$STAGE" \( -name '*.o' -o -name '*.cmd' -o -name 'Module.symvers*' -o -name '*.ko' \) \
 	-print0 2>/dev/null | xargs -0 -r rm -f
-rm -f "$STAGE"/stock_driver "$STAGE"/driver.log "$STAGE"/selftest.log \
-	"$STAGE"/payload/oplus_mm_config.xml "$STAGE"/payload/oplus_mm_config.orig.xml
+rm -f "$STAGE"/stock_driver "$STAGE"/driver.log "$STAGE"/selftest.log "$STAGE"/early.log
+
+cp "$KODIR/oplus_bsp_hybridswap_zram.ko" "$STAGE/payload/oplus_bsp_hybridswap_zram.ko"
 
 chmod 0755 "$STAGE"/customize.sh "$STAGE"/service.sh "$STAGE"/zram.sh \
-	"$STAGE"/post-fs-data.sh "$STAGE"/uninstall.sh "$STAGE"/webroot/webui.sh 2>/dev/null || true
-chmod 0644 "$STAGE"/module.prop "$STAGE"/payload/driver.conf 2>/dev/null || true
+	"$STAGE"/post-fs-data.sh "$STAGE"/early.sh "$STAGE"/uninstall.sh \
+	"$STAGE"/webroot/webui.sh 2>/dev/null || true
+chmod 0644 "$STAGE"/module.prop "$STAGE"/payload/driver.conf \
+	"$STAGE"/payload/ko_params "$STAGE"/payload/oplus_bsp_hybridswap_zram.ko 2>/dev/null || true
 
 ZIP="$OUT/lz4kds-ksu-6.6.118.zip"
 rm -f "$ZIP"

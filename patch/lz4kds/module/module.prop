@@ -1,6 +1,6 @@
 id=lz4kds
-name=LZ4KD 内存压缩（RMX5010 6.6.118）
-version=1.1-r0
-versionCode=2
+name=LZ4KDS 内存压缩（RMX5010 6.6.118）
+version=2.0-r0
+versionCode=3
 author=LMQ00 / jkHXQ（适配层）
-description=开机让 zram0 用 LZ4KD 压缩，算法由自编内核提供｜改的是 /odm 上那份 mm 配置，不写分区｜换回厂商默认只写一个标志文件
+description=early-init 阶段换上自带 KO，让 zram0 用 LZ4KDS + SDDC 相似页压缩｜不写分区｜HybridSwap 一并启用

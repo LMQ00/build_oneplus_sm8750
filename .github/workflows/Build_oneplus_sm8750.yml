@@ -915,11 +915,19 @@ jobs:
             --our-symvers out/vmlinux.symvers \
             --reference   "${GITHUB_WORKSPACE}/patch/lz4kds/abi/device_crc_reference.tsv"
 
+      - name: 🔧 Build LZ4KDS zram driver (编译 LZ4KDS 版 zram 驱动)
+        run: |
+          set -euo pipefail
+          export PATH="${GITHUB_WORKSPACE}/kernel_workspace/clang18/bin:${GITHUB_WORKSPACE}/kernel_workspace/build-tools/bin:$PATH"
+          cd kernel_workspace/common
+          bash "${GITHUB_WORKSPACE}/patch/lz4kds/scripts/build_driver.sh" \
+            "$(pwd)" "${GITHUB_WORKSPACE}/lz4kds_out"
+
       - name: 📦 Package LZ4KDS KSU module (打包 LZ4KDS 模块)
         run: |
           set -euo pipefail
           bash "${GITHUB_WORKSPACE}/patch/lz4kds/scripts/package_ksu_module.sh" \
-            "${GITHUB_WORKSPACE}/lz4kds_module"
+            "${GITHUB_WORKSPACE}/lz4kds_module" "${GITHUB_WORKSPACE}/lz4kds_out"
 
       - name: 📤 Upload LZ4KDS module (上传 LZ4KDS 侧载模块)
         uses: actions/upload-artifact@v6

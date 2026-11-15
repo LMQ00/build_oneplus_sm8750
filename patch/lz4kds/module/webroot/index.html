@@ -175,7 +175,7 @@
 <div class="topbar">
   <div>
     <div class="brand">LZ4KDS <span>内存压缩</span></div>
-    <div class="sub" id="sub">LZ4KD 压缩 · 只写运行内存，不碰分区</div>
+    <div class="sub" id="sub">LZ4KDS + SDDC 压缩 · 只写运行内存，不碰分区</div>
   </div>
   <div class="top-actions">
     <button class="theme-btn" id="themeBtn" onclick="cycleTheme()" title="主题：自动">
@@ -215,7 +215,7 @@
 </section>
 
 <section class="card">
-  <div class="label">容量（MiB，填多少就是多少）</div>
+  <div class="label">容量（MiB，重启后生效）</div>
   <div class="input-wrap">
     <input id="size" type="number" min="512" max="65536" step="512" inputmode="numeric" placeholder="例如 9216">
     <span class="unit">MiB</span>
@@ -233,7 +233,7 @@
   <div class="actions">
     <button class="btn primary" onclick="apply()">立即应用</button>
   </div>
-  <div class="hint">即时生效，并持久保存。</div>
+  <div class="hint">保存后重启生效。驱动只在开机时接管。</div>
 </section>
 
 <section class="card"><pre id="log">就绪</pre></section>
@@ -366,6 +366,9 @@ async function refresh() {
 
   $('ds').innerHTML = mb(m.disksize);
   $('comp').textContent = m.comp || '-';
+  $('sub').textContent = m.driver
+    ? 'LZ4KDS + SDDC 压缩 · 驱动 ' + m.driver
+    : 'LZ4KDS + SDDC 压缩 · 驱动未加载';
 
   const avail = (m.avail || '').split(/\s+/).filter(Boolean);
   renderAlgos(avail, m.cfg_algo);
@@ -397,12 +400,12 @@ async function apply() {
   if (!v) return;
   const btns = document.querySelectorAll('button');
   btns.forEach(b => b.disabled = true);
-  $('loadingText').textContent = '正在应用…';
+  $('loadingText').textContent = '正在保存…';
   $('loading').classList.add('show');
   await sleep(80);
   log('执行中 ...');
   try {
-    const r = await exec(`sh ${MOD}/webroot/webui.sh apply ${v.size} ${v.algo} 1`);
+    const r = await exec(`sh ${MOD}/webroot/webui.sh apply ${v.size} ${v.algo}`);
     log(r.stdout + (r.stderr ? '\n' + r.stderr : ''));
     formFilled = false;
     await refresh();
