@@ -78,7 +78,9 @@ show() {
 	echo "swap     : $(grep zram0 /proc/swaps 2>/dev/null | awk '{print $4" kB used / "$3" kB total"}')"
 	echo "自检     : codec=$(cat /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_codec 2>/dev/null) io=$(cat /sys/module/oplus_bsp_hybridswap_zram/parameters/selftest_io 2>/dev/null)"
 
-	if [ -n "$DS_MB" ] && [ "$SIZE" != 0 ] && [ "$DS_MB" != "$SIZE" ]; then
+	# 容量只在 replace 模式下由本模块决定；algo 模式下容量是厂商脚本设的
+	if [ "$MODE" = "replace" ] && [ -n "$DS_MB" ] && [ "$SIZE" != 0 ] &&
+		[ "$DS_MB" != "$SIZE" ]; then
 		echo "!! 运行容量 $DS_MB MiB 与配置 $SIZE MiB 不一致：需重启"
 	fi
 	if [ -n "$DS" ] && [ "$ALGO" != off ] && [ ! -f "$FLAG" ]; then
