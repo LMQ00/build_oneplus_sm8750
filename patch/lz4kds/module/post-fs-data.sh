@@ -106,32 +106,32 @@ conf_args() {
 # 厂商驱动在 disksize 时用 zram->comp_algs[0] 建 zcomp，所以这里写的值一直
 # 留到 22 秒设容量时才生效。
 apply_algo() {
-	ALGO=$1
+	_want=$1
 
 	if [ ! -e "$ALGO_SYS" ]; then
 		log "ERROR: 没有 $ALGO_SYS"
 		return 1
 	fi
 
-	NOW=$(cur_algo)
-	if [ "$NOW" = "$ALGO" ]; then
-		log "已经是 $ALGO，不写"
+	_now=$(cur_algo)
+	if [ "$_now" = "$_want" ]; then
+		log "已经是 $_want，不写"
 		return 0
 	fi
 
-	# 设备已初始化时驱动会返回 EBUSY，写入必然失败，先记下现状。
-	if ! echo "$ALGO" >"$ALGO_SYS" 2>/dev/null; then
+	# 设备已初始化时驱动返回 EBUSY，写入必然失败，先记下现状。
+	if ! echo "$_want" >"$ALGO_SYS" 2>/dev/null; then
 		log "ERROR: 写 $ALGO_SYS 失败，当前 $(cur_algo)"
 		return 1
 	fi
 
-	AFTER=$(cur_algo)
-	if [ "$AFTER" != "$ALGO" ]; then
-		log "ERROR: 写完再读是 $AFTER，不是 $ALGO"
+	_after=$(cur_algo)
+	if [ "$_after" != "$_want" ]; then
+		log "ERROR: 写完再读是 $_after，不是 $_want"
 		return 1
 	fi
 
-	log "算法 $NOW -> $ALGO"
+	log "算法 $_now -> $_want"
 	return 0
 }
 
