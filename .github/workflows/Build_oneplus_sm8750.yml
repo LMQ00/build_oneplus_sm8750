@@ -1151,7 +1151,7 @@ jobs:
           done
 
           # LZ4KDS 侧载模块：build job 里已经打好 zip，直接提到根目录参与发布。
-          # 这是 KernelSU 模块（preinit 抢载 KO），与 AK3 内核包相互独立。
+          # 这是 KernelSU 模块，与 AK3 内核包相互独立。
           for lz_dir in ./release_assets/LZ4KDS_module_*/; do
             if [ -d "$lz_dir" ]; then
               for z in "$lz_dir"*.zip; do
