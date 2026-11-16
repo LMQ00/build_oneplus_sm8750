@@ -1131,79 +1131,94 @@ void get_next_memcg_break(struct mem_cgroup *memcg)
 
 EXPORT_SYMBOL_GPL(get_next_memcg_break);
 
-static struct cftype mem_cgroup_hybridswap_legacy_files[] = {
-	{
-		.name = "force_shrink_anon_percent",
-		.write = mem_cgroup_force_shrink_anon_percent,
+#define HYBRIDSWAP_MEMCG_CFTYPES_BASE \
+	{ \
+		.name = "force_shrink_anon_percent", \
+		.write = mem_cgroup_force_shrink_anon_percent, \
+	}, \
+	{ \
+		.name = "force_shrink_anon", \
+		.write = mem_cgroup_force_shrink_anon, \
+	}, \
+	{ \
+		.name = "force_shrink_file", \
+		.write = mem_cgroup_force_shrink_file, \
+	}, \
+	{ \
+		.name = "total_info_per_app", \
+		.flags = CFTYPE_ONLY_ON_ROOT, \
+		.seq_show = memcg_total_info_per_app_show, \
+	}, \
+	{ \
+		.name = "aging_anon", \
+		.write = mem_cgroup_aging_anon, \
+	}, \
+	{ \
+		.name = "swap_stat", \
+		.seq_show = memcg_swap_stat_show, \
+	}, \
+	{ \
+		.name = "swap_stat_array", \
+		.seq_show = memcg_swap_stat_array_show, \
+	}, \
+	{ \
+		.name = "name", \
+		.write = mem_cgroup_name_write, \
+		.seq_show = mem_cgroup_name_show, \
+	}, \
+	{ \
+		.name = "app_score", \
+		.write_s64 = mem_cgroup_app_score_write, \
+		.read_s64 = mem_cgroup_app_score_read, \
+	}, \
+	{ \
+		.name = "app_uid", \
+		.write_s64 = mem_cgroup_app_uid_write, \
+		.read_s64 = mem_cgroup_app_uid_read, \
+	}, \
+	{ \
+		.name = "ub_ufs2zram_ratio", \
+		.write_s64 = mem_cgroup_ub_ufs2zram_ratio_write, \
+		.read_s64 = mem_cgroup_ub_ufs2zram_ratio_read, \
+	}, \
+	{ \
+		.name = "force_swapin", \
+		.write_s64 = mem_cgroup_force_swapin_write, \
+	}, \
+	{ \
+		.name = "force_swapout", \
+		.write_s64 = mem_cgroup_force_swapout_write, \
 	},
-	{
-		.name = "force_shrink_anon",
-		.write = mem_cgroup_force_shrink_anon,
-	},
-	{
-		.name = "force_shrink_file",
-		.write = mem_cgroup_force_shrink_file,
-	},
-	{
-		.name = "total_info_per_app",
-		.flags = CFTYPE_ONLY_ON_ROOT,
-		.seq_show = memcg_total_info_per_app_show,
-	},
-	{
-		.name = "aging_anon",
-		.write = mem_cgroup_aging_anon,
-	},
-	{
-		.name = "swap_stat",
-		.seq_show = memcg_swap_stat_show,
-	},
-	{
-		.name = "swap_stat_array",
-		.seq_show = memcg_swap_stat_array_show,
-	},
-	{
-		.name = "name",
-		.write = mem_cgroup_name_write,
-		.seq_show = mem_cgroup_name_show,
-	},
-	{
-		.name = "app_score",
-		.write_s64 = mem_cgroup_app_score_write,
-		.read_s64 = mem_cgroup_app_score_read,
-	},
-	{
-		.name = "app_uid",
-		.write_s64 = mem_cgroup_app_uid_write,
-		.read_s64 = mem_cgroup_app_uid_read,
-	},
-	{
-		.name = "ub_ufs2zram_ratio",
-		.write_s64 = mem_cgroup_ub_ufs2zram_ratio_write,
-		.read_s64 = mem_cgroup_ub_ufs2zram_ratio_read,
-	},
-	{
-		.name = "force_swapin",
-		.write_s64 = mem_cgroup_force_swapin_write,
-	},
-	{
-		.name = "force_swapout",
-		.write_s64 = mem_cgroup_force_swapout_write,
-	},
+
 #ifdef CONFIG_HYBRIDSWAP_CORE
-	{
-		.name = "psi",
-		.flags = CFTYPE_ONLY_ON_ROOT,
-		.seq_show = hybridswap_psi_show,
+#define HYBRIDSWAP_MEMCG_CFTYPES_CORE \
+	{ \
+		.name = "psi", \
+		.flags = CFTYPE_ONLY_ON_ROOT, \
+		.seq_show = hybridswap_psi_show, \
+	}, \
+	{ \
+		.name = "stored_wm_ratio", \
+		.flags = CFTYPE_ONLY_ON_ROOT, \
+		.write_s64 = mem_cgroup_stored_wm_ratio_write, \
+		.read_s64 = mem_cgroup_stored_wm_ratio_read, \
 	},
-	{
-		.name = "stored_wm_ratio",
-		.flags = CFTYPE_ONLY_ON_ROOT,
-		.write_s64 = mem_cgroup_stored_wm_ratio_write,
-		.read_s64 = mem_cgroup_stored_wm_ratio_read,
-	},
+#else
+#define HYBRIDSWAP_MEMCG_CFTYPES_CORE
 #endif
+
+static struct cftype mem_cgroup_hybridswap_legacy_files[] = {
+	HYBRIDSWAP_MEMCG_CFTYPES_BASE
+	HYBRIDSWAP_MEMCG_CFTYPES_CORE
 	{ }, /* terminate */
 };
+
+static struct cftype mem_cgroup_hybridswap_dfl_files[] = {
+	HYBRIDSWAP_MEMCG_CFTYPES_BASE
+	HYBRIDSWAP_MEMCG_CFTYPES_CORE
+	{ }, /* terminate */
+};
+
 
 static int hybridswap_enable(struct zram **zram_arr)
 {
@@ -1342,10 +1357,23 @@ int __init hybridswap_pre_init(void)
 		return ret;
 	}
 
+	/*
+	 * 两套层级各挂一份。cgroup_add_legacy_cftypes 挂的只在 v1 层级出现，
+	 * cgroup_add_dfl_cftypes 挂的只在 v2 层级出现；设备上 memory 控制器
+	 * 挂在 v2（/sys/fs/cgroup 是 cgroup2），只挂 legacy 那份的话文件不会
+	 * 出现，用户态写不进来，swapd 的阈值就一直是 0。
+	 */
 	ret = cgroup_add_legacy_cftypes(&memory_cgrp_subsys,
 			mem_cgroup_hybridswap_legacy_files);
 	if (ret) {
 		log_info("add mem_cgroup_hybridswap_legacy_files failed\n");
+		goto error_out;
+	}
+
+	ret = cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
+			mem_cgroup_hybridswap_dfl_files);
+	if (ret) {
+		log_info("add mem_cgroup_hybridswap_dfl_files failed\n");
 		goto error_out;
 	}
 
@@ -1377,9 +1405,16 @@ pre_init:
 	}
 
 	ret = cgroup_add_legacy_cftypes(&memory_cgrp_subsys,
-			hybridswapd_ops->memcg_legacy_files);
+			hybridswapd_ops->memcg_files);
 	if (ret) {
 		log_info("add mem_cgroup_swapd_legacy_files failed!\n");
+		goto fail_out;
+	}
+
+	ret = cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
+			hybridswapd_ops->memcg_dfl_files);
+	if (ret) {
+		log_info("add mem_cgroup_swapd_dfl_files failed!\n");
 		goto fail_out;
 	}
 #endif
@@ -1402,6 +1437,7 @@ error_out:
 	 * out_error，模块随即被卸载、代码段释放，留下的数组就是悬空指针。
 	 */
 	cgroup_rm_cftypes(mem_cgroup_hybridswap_legacy_files);
+	cgroup_rm_cftypes(mem_cgroup_hybridswap_dfl_files);
 	if (hybridswap_cache) {
 		kmem_cache_destroy(hybridswap_cache);
 		hybridswap_cache = NULL;
@@ -1439,9 +1475,11 @@ void __exit hybridswap_exit(void)
 	 * 数组本身已挂上时返回 0，没挂上时返回 -ENOENT，两种情况都可以忽略。
 	 */
 	cgroup_rm_cftypes(mem_cgroup_hybridswap_legacy_files);
+	cgroup_rm_cftypes(mem_cgroup_hybridswap_dfl_files);
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 	if (hybridswapd_ops) {
-		cgroup_rm_cftypes(hybridswapd_ops->memcg_legacy_files);
+		cgroup_rm_cftypes(hybridswapd_ops->memcg_files);
+		cgroup_rm_cftypes(hybridswapd_ops->memcg_dfl_files);
 		kfree(hybridswapd_ops);
 		hybridswapd_ops = NULL;
 	}

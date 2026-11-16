@@ -567,7 +567,8 @@ static inline bool hybridswap_reclaim_in_enable(void) { return false; }
 
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
 struct hybridswapd_operations {
-	struct cftype *memcg_legacy_files;
+	struct cftype *memcg_files;
+	struct cftype *memcg_dfl_files;
 	atomic_long_t *fault_out_pause;
 	atomic_long_t *fault_out_pause_cnt;
 	atomic_t *swapd_pause;
