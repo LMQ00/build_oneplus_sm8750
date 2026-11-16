@@ -1207,6 +1207,10 @@ EXPORT_SYMBOL_GPL(get_next_memcg_break);
 #define HYBRIDSWAP_MEMCG_CFTYPES_CORE
 #endif
 
+/*
+ * 两份独立的数组：cgroup 在注册时把 __CFTYPE_ADDED / __CFTYPE_ONLY_ON_DFL
+ * 这类标志写在数组元素本身，同一份数组无法同时挂到两个层级。
+ */
 static struct cftype mem_cgroup_hybridswap_legacy_files[] = {
 	HYBRIDSWAP_MEMCG_CFTYPES_BASE
 	HYBRIDSWAP_MEMCG_CFTYPES_CORE
@@ -1427,6 +1431,14 @@ pre_init:
 
 fail_out:
 #ifdef CONFIG_HYBRIDSWAP_SWAPD
+	/*
+	 * swapd 的两份数组可能已经挂上（比如 dfl 那份失败时 legacy 那份是成的），
+	 * 先摘再释 ops，否则 ss->cfts 会留着指向本模块代码段的节点。
+	 */
+	if (hybridswapd_ops) {
+		cgroup_rm_cftypes(hybridswapd_ops->memcg_files);
+		cgroup_rm_cftypes(hybridswapd_ops->memcg_dfl_files);
+	}
 	hybridswapd_ops->pre_deinit();
 	kfree(hybridswapd_ops);
 	hybridswapd_ops = NULL;

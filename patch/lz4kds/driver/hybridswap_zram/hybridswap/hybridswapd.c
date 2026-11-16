@@ -1049,11 +1049,6 @@ static u64 zram_used_limit_mb_read(struct cgroup_subsys_state *css,
 		.read_s64 = mem_cgroup_compress_ratio_read, \
 	}, \
 	{ \
-		.name = "swapd_pressure", \
-		.flags = CFTYPE_ONLY_ON_ROOT, \
-		.write = swapd_pressure_event_control, \
-	}, \
-	{ \
 		.name = "swapd_pid", \
 		.flags = CFTYPE_ONLY_ON_ROOT, \
 		.read_s64 = swapd_pid_read, \
@@ -1161,6 +1156,10 @@ static u64 zram_used_limit_mb_read(struct cgroup_subsys_state *css,
 		.write = swapd_pressure_event_control, \
 	},
 
+/*
+ * 两份独立的数组，理由同 hybridmain.c 里那两份。swapd_pressure 只在 v1 那份里，
+ * 与厂商 KO 的排布一致：它接收的是一对 "efd level"，v2 层级上没有对应的写法。
+ */
 struct cftype mem_cgroup_swapd_legacy_files[] = {
 	SWAPD_MEMCG_CFTYPES
 	SWAPD_MEMCG_PRESSURE
