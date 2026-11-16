@@ -81,6 +81,22 @@ show() {
 		echo "== SDDC"
 		head -12 /sys/block/zram0/sddc_stat 2>/dev/null
 	fi
+	show_hybridswap
+}
+
+# HybridSwap 在不在干活，看 vmstat 的计数。全部为 0 说明这套机制没被用上。
+show_hybridswap() {
+	_vm=/sys/block/zram0/hybridswap_vmstat
+	[ -f "$_vm" ] || return 0
+	echo "== HybridSwap"
+	awk '$1 == "swapd_wakeup" || $1 == "swapd_swapout" || $1 == "swapd_shrink_anon" ||
+	     $1 == "swapd_over_min_buffer_skip_times" { printf "%-32s %s\n", $1, $2 }' "$_vm"
+	_av=/sys/fs/cgroup/memory.avail_buffers
+	if [ -e "$_av" ]; then
+		echo "唤醒阈值 : $(cat "$_av")"
+	else
+		echo "唤醒阈值 : 没有 $_av"
+	fi
 }
 
 write_param() {
